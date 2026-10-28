@@ -217,6 +217,28 @@ def test_edit_before_record_exists_is_buffered() -> None:
     assert [c.dot for c in b.history] == [("A", 1), ("A", 2)]
 
 
+def test_edit_by_another_replica_waits_for_the_create() -> None:
+    """Cross-origin case: B edits A's record, and B's edit reaches C before A's create.
+
+    The "next change from this origin" check alone would accept B#1, so this
+    needs the dependency check: B#1's clock says it depends on A#1.
+    """
+    a, ta = make("A", [])
+    b, tb = make("B", [])
+    c, _ = make("C", [])
+    rec = a.create_record("visit", "visit_report")
+    create_env = ta.take()
+    deliver(create_env, b)  # B has the record; C has not seen the create yet
+    b.edit(rec, 0, insert="note")
+
+    deliver(tb.take(), c)  # B#1 arrives at C first
+    assert not c.has_record(rec)
+    assert len(c.pending) == 1 and c.waiting_on(c.pending[0]) == {"A": 1}
+
+    deliver(create_env, c)
+    assert c.pending == [] and c.text(rec) == "note"
+
+
 def test_invalid_replica_id_rejected() -> None:
     with pytest.raises(ValueError):
         make("field-office", [])
