@@ -6,6 +6,7 @@ periodic anti-entropy from the virtual clock, and collects the global trace.
 
 from collections.abc import Iterable, Sequence
 
+from fieldsync.crdt import RecordKind
 from fieldsync.runtime.replica import Replica
 from fieldsync.runtime.trace import TraceEvent
 from fieldsync.sim.network import InFlight, SimNetwork, SimTransport
@@ -50,12 +51,18 @@ class Simulation:
     def __getitem__(self, replica_id: str) -> Replica:
         return self.replicas[replica_id]
 
-    # -------------------------------------------------------------- edits
-    def edit(self, replica_id: str, index: int, delete: int = 0, insert: str = "") -> None:
-        self.replicas[replica_id].edit(index, delete, insert)
+    # ------------------------------------------------------ records/edits
+    def create_record(self, replica_id: str, title: str, kind: RecordKind = "visit_report") -> str:
+        """Create a record on ``replica_id``; returns its ID. It spreads like any edit."""
+        return self.replicas[replica_id].create_record(title, kind)
 
-    def set_text(self, replica_id: str, text: str) -> None:
-        self.replicas[replica_id].set_text(text)
+    def edit(
+        self, replica_id: str, record: str, index: int, delete: int = 0, insert: str = ""
+    ) -> None:
+        self.replicas[replica_id].edit(record, index, delete, insert)
+
+    def set_text(self, replica_id: str, record: str, text: str) -> None:
+        self.replicas[replica_id].set_text(record, text)
 
     # ------------------------------------------------------------- faults
     def partition(self, groups: Sequence[Iterable[str]]) -> None:
@@ -118,12 +125,19 @@ class Simulation:
         return self.fully_synced()
 
     # ------------------------------------------------------------ queries
-    def texts(self) -> dict[str, str]:
-        return {rid: r.text() for rid, r in self.replicas.items()}
+    def texts(self, record: str) -> dict[str, str]:
+        """Each replica's text of ``record`` ("" where the record hasn't arrived yet)."""
+        return {
+            rid: r.text(record) if r.has_record(record) else "" for rid, r in self.replicas.items()
+        }
+
+    def record_ids(self) -> dict[str, list[str]]:
+        """The record IDs each replica knows, in list order."""
+        return {rid: [i.id for i in r.list_records()] for rid, r in self.replicas.items()}
 
     def converged(self) -> bool:
-        """Same visible text on every replica (what the convergence badges show)."""
-        return len({r.doc.digest() for r in self.replicas.values()}) <= 1
+        """Same records and same visible texts on every replica (what the badges show)."""
+        return len({r.state_digest() for r in self.replicas.values()}) <= 1
 
     def fully_synced(self) -> bool:
         """Every replica has applied the same set of changes and buffers nothing."""

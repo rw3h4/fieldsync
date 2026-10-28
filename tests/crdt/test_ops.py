@@ -27,6 +27,7 @@ def test_change_json_round_trip() -> None:
         seq=2,
         clock=VectorClock({"A": 2, "B": 5}),
         ops=(Insert(ElementId(7, "A"), HEAD, "h"), Delete(ElementId(4, "B"))),
+        record="B-1",
     )
     assert Change.from_json(json.loads(json.dumps(change.to_json()))) == change
     assert change.dot == ("A", 2)
@@ -34,7 +35,7 @@ def test_change_json_round_trip() -> None:
 
 def test_change_requires_consistent_clock() -> None:
     with pytest.raises(ValueError):
-        Change(origin="A", seq=2, clock=VectorClock({"A": 1}), ops=())
+        Change(origin="A", seq=2, clock=VectorClock({"A": 1}), ops=(), record="B-1")
 
 
 def test_unknown_op_type_rejected() -> None:

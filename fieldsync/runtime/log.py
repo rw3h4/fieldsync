@@ -31,15 +31,21 @@ requester can deliver a response without buffering.
 from collections.abc import Callable
 from typing import Literal
 
-from fieldsync.crdt import Change, Op, VectorClock
+from fieldsync.crdt import Change, Op, VectorClock, check_replica_id
 from fieldsync.runtime.transport import Payload, SyncRequest, SyncResponse
 
 Offer = Literal["delivered", "buffered", "duplicate"]
 
 
 class CausalLog:
+    """Causal delivery and anti-entropy state for one replica or relay (no documents).
+
+    A single vector clock covers every record: record creation and edits to
+    all records form one causal stream.
+    """
+
     def __init__(self, owner: str, on_deliver: Callable[[Change], None] | None = None) -> None:
-        self.owner = owner
+        self.owner = check_replica_id(owner)
         self.clock = VectorClock()
         self.history: list[Change] = []  # every delivered change, in delivery (= causal) order
         self.pending: list[Change] = []  # causal buffer: received but not yet deliverable
@@ -47,10 +53,10 @@ class CausalLog:
         self._on_deliver = on_deliver
 
     # ================================================================ local
-    def append_local(self, ops: tuple[Op, ...]) -> Change:
-        """Record the owner's own new change. The vector clock ticks once per change."""
+    def append_local(self, record: str, ops: tuple[Op, ...]) -> Change:
+        """Record the owner's own new change to ``record``. The clock ticks once per change."""
         self.clock = self.clock.increment(self.owner)
-        change = Change(self.owner, self.clock.get(self.owner), self.clock, ops)
+        change = Change(self.owner, self.clock.get(self.owner), self.clock, ops, record)
         self.history.append(change)
         return change
 

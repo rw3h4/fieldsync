@@ -17,6 +17,7 @@ CHANGE = Change(
     1,
     VectorClock({"A": 1}),
     (Insert(ElementId(1, "A"), HEAD, "x"), Delete(ElementId(1, "A"))),
+    "B-1",
 )
 
 

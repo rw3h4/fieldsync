@@ -46,7 +46,7 @@ def local_edit(peer: Peer, data: st.DataObject) -> Change | None:
         ops = list(peer.rga.local_insert(index, text))
     peer.clock = peer.clock.increment(peer.rga.replica_id)
     rid = peer.rga.replica_id
-    return Change(rid, peer.clock.get(rid), peer.clock, tuple(ops))
+    return Change(rid, peer.clock.get(rid), peer.clock, tuple(ops), "doc")
 
 
 def pending_for(peer: Peer, changes: list[Change]) -> list[Change]:

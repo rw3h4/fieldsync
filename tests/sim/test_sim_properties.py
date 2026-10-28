@@ -5,6 +5,8 @@ from hypothesis import strategies as st
 
 from fieldsync.sim import Simulation
 
+from .conftest import shared_record
+
 IDS = ["A", "B", "C", "D"]
 
 
@@ -20,6 +22,7 @@ def test_random_faults_then_heal_converges(data: st.DataObject) -> None:
         jitter=0.4,
         anti_entropy_interval=data.draw(st.sampled_from([None, 1.0, 3.0]), label="ae"),
     )
+    rec = shared_record(s)
     s.set_reorder(data.draw(st.booleans(), label="reorder"))
 
     for _ in range(data.draw(st.integers(1, 30), label="steps")):
@@ -31,13 +34,13 @@ def test_random_faults_then_heal_converges(data: st.DataObject) -> None:
         )
         rid = data.draw(st.sampled_from(ids), label="replica")
         if action == "edit":
-            length = len(s[rid].text())
+            length = len(s[rid].text(rec))
             if length and data.draw(st.booleans(), label="delete?"):
                 index = data.draw(st.integers(0, length - 1))
-                s.edit(rid, index, delete=data.draw(st.integers(1, min(3, length - index))))
+                s.edit(rid, rec, index, delete=data.draw(st.integers(1, min(3, length - index))))
             else:
                 index = data.draw(st.integers(0, length))
-                s.edit(rid, index, insert=data.draw(st.text("abxy", min_size=1, max_size=3)))
+                s.edit(rid, rec, index, insert=data.draw(st.text("abxy", min_size=1, max_size=3)))
         elif action == "advance":
             s.advance(data.draw(st.floats(0.0, 3.0)))
         elif action == "partition":
@@ -58,4 +61,4 @@ def test_random_faults_then_heal_converges(data: st.DataObject) -> None:
     s.heal()
     assert s.settle(max_time=300)
     assert s.converged()
-    assert len({r.doc.snapshot() for r in s.replicas.values()}) == 1
+    assert len({r.document(rec).snapshot() for r in s.replicas.values()}) == 1

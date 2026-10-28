@@ -6,6 +6,7 @@ from typing import Literal
 from fieldsync.crdt import VectorClock
 
 EventKind = Literal[
+    "create",  # local record creation turned into a Change and applied
     "edit",  # local edit turned into a Change and applied
     "send",  # envelope handed to the transport
     "receive",  # envelope arrived from the transport
@@ -21,8 +22,9 @@ class TraceEvent:
     replica: str
     kind: EventKind
     clock: VectorClock  # the replica's vector clock *after* the event
-    lamport: int  # the replica's Lamport clock after the event
+    lamport: int  # Lamport clock of the record involved after the event (0 if none)
     detail: str  # human-readable summary
     msg_id: str | None = None  # envelope involved (send/receive), if any
     peer: str | None = None  # the other side: dst for send, src for receive
     dot: tuple[str, int] | None = None  # (origin, seq) of the change involved, if any
+    record: str | None = None  # record the change belongs to, if any

@@ -6,7 +6,7 @@ from fieldsync.runtime.transport import SyncRequest, SyncResponse
 
 
 def change(origin: str, seq: int, **deps: int) -> Change:
-    return Change(origin, seq, VectorClock({**deps, origin: seq}), ())
+    return Change(origin, seq, VectorClock({**deps, origin: seq}), (), "r")
 
 
 def test_in_order_changes_are_delivered() -> None:
@@ -48,7 +48,7 @@ def test_duplicates_delivered_or_pending_are_ignored() -> None:
 def test_append_local_ticks_own_entry() -> None:
     log = CausalLog("R")
     log.offer(change("A", 1))
-    mine = log.append_local(())
+    mine = log.append_local("r", ())
     assert mine.dot == ("R", 1)
     assert mine.clock == VectorClock({"A": 1, "R": 1})  # depends on everything seen
     assert log.history[-1] is mine
