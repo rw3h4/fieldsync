@@ -3,7 +3,7 @@
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from editor.sim import Simulation
+from fieldsync.sim import Simulation
 
 IDS = ["A", "B", "C", "D"]
 

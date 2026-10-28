@@ -2,7 +2,7 @@ from collections.abc import Iterable
 
 import pytest
 
-from editor.crdt import HEAD, RGA, Delete, ElementId, Insert, MissingDependency, Op
+from fieldsync.crdt import HEAD, RGA, Delete, ElementId, Insert, MissingDependency, Op
 
 
 def apply_all(rga: RGA, ops: Iterable[Op]) -> None:

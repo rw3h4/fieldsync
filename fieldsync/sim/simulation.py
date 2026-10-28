@@ -6,10 +6,10 @@ periodic anti-entropy from the virtual clock, and collects the global trace.
 
 from collections.abc import Iterable, Sequence
 
-from editor.sim.network import InFlight, SimNetwork, SimTransport
-from editor.sim.replica import Replica
-from editor.sim.scheduler import Scheduler
-from editor.sim.trace import TraceEvent
+from fieldsync.runtime.replica import Replica
+from fieldsync.runtime.trace import TraceEvent
+from fieldsync.sim.network import InFlight, SimNetwork, SimTransport
+from fieldsync.sim.scheduler import Scheduler
 
 
 class Simulation:

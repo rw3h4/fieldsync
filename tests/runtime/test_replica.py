@@ -1,5 +1,5 @@
-from editor.sim.replica import Replica
-from editor.sim.transport import ChangeMsg, Envelope, SyncRequest, SyncResponse
+from fieldsync.runtime.replica import Replica
+from fieldsync.runtime.transport import ChangeMsg, Envelope, SyncRequest, SyncResponse
 
 from .conftest import ManualTransport
 

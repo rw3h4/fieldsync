@@ -1,7 +1,7 @@
 from hypothesis import given
 from hypothesis import strategies as st
 
-from editor.crdt import TextEdit, diff
+from fieldsync.crdt import TextEdit, diff
 
 
 def test_equal_texts_have_no_diff() -> None:

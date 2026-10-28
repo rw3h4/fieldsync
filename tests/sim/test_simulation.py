@@ -1,4 +1,4 @@
-from editor.sim import Simulation
+from fieldsync.sim import Simulation
 
 
 def scripted(seed: int) -> Simulation:

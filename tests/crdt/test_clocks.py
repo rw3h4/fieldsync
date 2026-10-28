@@ -1,4 +1,4 @@
-from editor.crdt import LamportClock, VectorClock
+from fieldsync.crdt import LamportClock, VectorClock
 
 
 def test_lamport_tick_and_observe() -> None:

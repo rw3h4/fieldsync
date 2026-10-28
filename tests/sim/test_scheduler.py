@@ -1,4 +1,4 @@
-from editor.sim.scheduler import Scheduler
+from fieldsync.sim.scheduler import Scheduler
 
 
 def test_events_run_in_time_then_fifo_order() -> None:

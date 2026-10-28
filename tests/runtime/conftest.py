@@ -1,6 +1,6 @@
 from collections.abc import Callable, Sequence
 
-from editor.sim.transport import Envelope
+from fieldsync.runtime.transport import Envelope
 
 
 class ManualTransport:

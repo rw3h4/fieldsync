@@ -1,5 +1,5 @@
-from editor.crdt import HEAD, Change, Delete, ElementId, Insert, VectorClock
-from editor.sim.transport import (
+from fieldsync.crdt import HEAD, Change, Delete, ElementId, Insert, VectorClock
+from fieldsync.runtime.transport import (
     ChangeMsg,
     Envelope,
     Hello,

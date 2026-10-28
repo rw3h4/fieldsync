@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from editor.crdt import RGA, Change, VectorClock
+from fieldsync.crdt import RGA, Change, VectorClock
 
 REPLICA_IDS = ["A", "B", "C", "D"]
 

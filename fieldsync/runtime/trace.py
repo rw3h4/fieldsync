@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from editor.crdt import VectorClock
+from fieldsync.crdt import VectorClock
 
 EventKind = Literal[
     "edit",  # local edit turned into a Change and applied

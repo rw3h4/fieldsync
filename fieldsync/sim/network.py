@@ -21,8 +21,8 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
-from editor.sim.scheduler import Scheduler
-from editor.sim.transport import BROADCAST, Envelope
+from fieldsync.runtime.transport import BROADCAST, Envelope
+from fieldsync.sim.scheduler import Scheduler
 
 Status = Literal["in_flight", "held", "delivered", "dropped"]
 

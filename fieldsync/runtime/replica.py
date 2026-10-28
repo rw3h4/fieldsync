@@ -31,9 +31,9 @@ recovered as soon as any two replicas talk again.
 from collections.abc import Callable
 from itertools import count
 
-from editor.crdt import RGA, Change, Op, VectorClock, diff
-from editor.sim.trace import EventKind, TraceEvent
-from editor.sim.transport import (
+from fieldsync.crdt import RGA, Change, Op, VectorClock, diff
+from fieldsync.runtime.trace import EventKind, TraceEvent
+from fieldsync.runtime.transport import (
     BROADCAST,
     ChangeMsg,
     Envelope,

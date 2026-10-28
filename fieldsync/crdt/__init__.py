@@ -4,11 +4,11 @@ This package has no I/O, no asyncio and no UI imports, so it can be tested and
 reasoned about in isolation.
 """
 
-from editor.crdt.clocks import LamportClock, VectorClock
-from editor.crdt.diff import TextEdit, diff
-from editor.crdt.ids import HEAD, ElementId
-from editor.crdt.ops import Change, Delete, Insert, Op, op_from_json, op_to_json
-from editor.crdt.rga import RGA, Element, MissingDependency
+from fieldsync.crdt.clocks import LamportClock, VectorClock
+from fieldsync.crdt.diff import TextEdit, diff
+from fieldsync.crdt.ids import HEAD, ElementId
+from fieldsync.crdt.ops import Change, Delete, Insert, Op, op_from_json, op_to_json
+from fieldsync.crdt.rga import RGA, Element, MissingDependency
 
 __all__ = [
     "HEAD",

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from editor.crdt import (
+from fieldsync.crdt import (
     HEAD,
     Change,
     Delete,

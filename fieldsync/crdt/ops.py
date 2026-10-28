@@ -11,8 +11,8 @@ Wire format of ops::
 from dataclasses import dataclass
 from typing import Any
 
-from editor.crdt.clocks import VectorClock
-from editor.crdt.ids import ElementId
+from fieldsync.crdt.clocks import VectorClock
+from fieldsync.crdt.ids import ElementId
 
 JSON = dict[str, Any]
 

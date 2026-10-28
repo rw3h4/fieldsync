@@ -1,6 +1,6 @@
 """Messages exchanged between replicas, and the ``Transport`` abstraction.
 
-The replica runtime (``editor.sim.replica``) only talks to a ``Transport``.
+The replica runtime (``fieldsync.runtime.replica``) only talks to a ``Transport``.
 The simulator (``SimTransport``) and real network mode (``WsTransport``)
 each implement it, so the causal buffer and anti-entropy logic are identical
 in both modes.
@@ -20,7 +20,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from editor.crdt import Change, VectorClock
+from fieldsync.crdt import Change, VectorClock
 
 BROADCAST = "*"
 

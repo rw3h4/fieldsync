@@ -45,9 +45,9 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from editor.crdt.clocks import LamportClock
-from editor.crdt.ids import HEAD, ElementId
-from editor.crdt.ops import Delete, Insert, Op
+from fieldsync.crdt.clocks import LamportClock
+from fieldsync.crdt.ids import HEAD, ElementId
+from fieldsync.crdt.ops import Delete, Insert, Op
 
 
 class MissingDependency(Exception):
