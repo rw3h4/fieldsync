@@ -1,4 +1,6 @@
-from fieldsync.runtime.replica import Replica
+import pytest
+
+from fieldsync.runtime.replica import RecordInfo, Replica, UnknownRecord
 from fieldsync.runtime.transport import ChangeMsg, Envelope, SyncRequest, SyncResponse
 
 from .conftest import ManualTransport
@@ -157,3 +159,64 @@ def test_late_joiner_gets_full_history() -> None:
     deliver(tc.take(), a)
     deliver(ta.take(), c)
     assert c.text(rec) == "alpha beta gamma"
+
+
+# ------------------------------------------------------------ multi-record
+def test_create_record_broadcasts_one_change_and_registers() -> None:
+    a, ta = make("A", ["B"])
+    rec = a.create_record("Kasese visit", "visit_report")
+    (env,) = ta.take()
+    assert isinstance(env.payload, ChangeMsg) and env.dst == "*"
+    assert env.payload.change.creates_record is not None
+    assert env.payload.change.record == rec
+    assert a.record(rec) == RecordInfo(rec, "Kasese visit", "visit_report", "A", 1)
+    assert a.text(rec) == ""
+
+
+def test_records_have_independent_texts_and_stable_order() -> None:
+    a, ta = make("A", [])
+    b, tb = make("B", [])
+    r1 = a.create_record("first", "visit_report")
+    r2 = b.create_record("second", "case_note")
+    deliver(ta.take(), b)
+    deliver(tb.take(), a)
+    a.edit(r1, 0, insert="one")
+    b.edit(r2, 0, insert="two")
+    deliver(ta.take(), b)
+    deliver(tb.take(), a)
+    for r in (a, b):
+        assert [i.id for i in r.list_records()] == [r1, r2]
+        assert (r.text(r1), r.text(r2)) == ("one", "two")
+    assert a.state_digest() == b.state_digest()
+
+
+def test_unknown_record_raises() -> None:
+    a, _ = make("A", [])
+    with pytest.raises(UnknownRecord):
+        a.edit("Z-1", 0, insert="x")
+    with pytest.raises(UnknownRecord):
+        a.text("Z-1")
+    assert not a.has_record("Z-1")
+
+
+def test_edit_before_record_exists_is_buffered() -> None:
+    a, ta = make("A", [])
+    b, _ = make("B", [])
+    rec = a.create_record("visit", "visit_report")
+    create_env = ta.take()
+    a.edit(rec, 0, insert="hi")
+    edit_env = ta.take()
+
+    deliver(edit_env, b)  # the edit overtakes the create
+    assert not b.has_record(rec)
+    assert len(b.pending) == 1 and b.waiting_on(b.pending[0]) == {"A": 1}
+
+    deliver(create_env, b)  # create arrives: both apply, in causal order
+    assert b.pending == []
+    assert b.text(rec) == "hi"
+    assert [c.dot for c in b.history] == [("A", 1), ("A", 2)]
+
+
+def test_invalid_replica_id_rejected() -> None:
+    with pytest.raises(ValueError):
+        make("field-office", [])
