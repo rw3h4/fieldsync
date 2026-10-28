@@ -3,11 +3,19 @@
 ## v1 Phase 1: scaffold and CRDT core (2026-10-17)
 - **Done:** uv project, ruff, pytest + hypothesis. `editor/crdt/`: `ElementId`, `LamportClock`, `VectorClock`, `Insert`/`Delete`/`Change` with JSON round-trip, `RGA` (tombstones, higher-ID-first tie-break, idempotent apply, cursor anchoring helpers), single-range `diff`.
 - **Tests:** unit tests plus a hypothesis property: random edits on 2–4 RGAs, applied in random causally valid orders, give identical text and element lists.
+- **Mutation check:**
+  - *Broke:* the tie-break loop in `RGA._integrate_insert` (`while pos < len(...) and self._elements[pos].id > op.id` → `... and False`), so a new insert never skips concurrent siblings with higher IDs.
+  - *Caught by:* the hypothesis property test `tests/crdt/test_convergence.py`. It failed with the minimal divergence `AssertionError: {'ab', 'ba'}`: two replicas inserting one character each at the same spot ended in different orders.
+  - *Restored:* the original `rga.py` was copied back; the full suite passed again (27 passed).
 - **Commit:** `320ae60`.
 
 ## v1 Phase 2: replica runtime and simulator (2026-10-17)
 - **Done:** `Transport` protocol and JSON message codec; `Replica` (causal buffer, op log in causal order, push-pull anti-entropy, trace events); deterministic scheduler; `SimNetwork` (latency, jitter, loss, reordering, partitions, offline, hold mode); `Simulation` facade.
 - **Tests:** same seed → same trace; buffering then release; duplicates ignored; loss repaired by anti-entropy; partition and heal; hold mode; late joiner; hypothesis end-to-end (random edits + random faults → heal → converged).
+- **Mutation checks** (both caught by the hypothesis end-to-end test `tests/sim/test_sim_properties.py`):
+  1. *Broke anti-entropy:* in `Replica._answer_sync`, `missing = self.missing_for(req.clock)` → `missing = []`, so sync requests are answered with nothing. *Result:* `assert False` where `False = settle(max_time=300)`: after random faults the replicas never converged, because lost messages were never repaired.
+  2. *Broke causal delivery:* `Replica._deliverable` made to return `True` immediately (no "next from origin" check, no dependency check). *Result:* `MissingDependency: unknown element 1@A`: a delete was applied before the insert it targets.
+  - *Restored:* the original `replica.py` was copied back; the full suite passed again (58 passed).
 - **Commit:** `bd9c229`.
 
 ## M0: setup and re-baseline (2026-10-28)
