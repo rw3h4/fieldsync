@@ -12,13 +12,15 @@ Wire format (JSON)::
      "body": {"clock": {"A": 2}, "reciprocate": true}}
     {"type": "sync_resp", "msg_id": "A:8", "src": "A", "dst": "B",
      "body": {"changes": [<Change>, ...], "clock": {...}}}
-    {"type": "hello",     "msg_id": "C:1", "src": "C", "dst": "*", "body": {}}
+    {"type": "hello",     "msg_id": "C:1", "src": "C", "dst": "*", "body": {"role": "node"}}
+    {"type": "heartbeat", "msg_id": "C:2", "src": "C", "dst": "A",
+     "body": {"sent_at": 12.5, "pong": false}}
 """
 
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from fieldsync.crdt import Change, VectorClock
 
@@ -53,12 +55,35 @@ class SyncResponse:
     clock: VectorClock
 
 
+Role = Literal["node", "relay"]
+
+
 @dataclass(frozen=True, slots=True)
 class Hello:
-    """Network mode only: registers a node with the relay."""
+    """Network mode only: introduces the sender to a relay.
+
+    ``role`` lets a relay tell editor nodes (which it forwards changes to)
+    from other relays (which it keeps in sync with relay-to-relay anti-entropy).
+    """
+
+    role: Role
 
 
-Payload = ChangeMsg | SyncRequest | SyncResponse | Hello
+@dataclass(frozen=True, slots=True)
+class Heartbeat:
+    """Network mode only: liveness check between a node and its relay.
+
+    A ping has ``pong=False``; the receiver answers with ``pong=True`` and the
+    same ``sent_at``, so the pinger can measure the round-trip time. Missing
+    pongs for longer than the timeout mean the relay is presumed dead and the
+    node fails over. Handled by the transport layer; the replica ignores it.
+    """
+
+    sent_at: float
+    pong: bool = False
+
+
+Payload = ChangeMsg | SyncRequest | SyncResponse | Hello | Heartbeat
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +107,9 @@ class Envelope:
             return f"sync_req {p.clock}" + ("" if p.reciprocate else " (counter)")
         if isinstance(p, SyncResponse):
             return f"sync_resp {len(p.changes)} change(s)"
-        return "hello"
+        if isinstance(p, Heartbeat):
+            return "pong" if p.pong else "ping"
+        return f"hello ({p.role})"
 
 
 class Transport(Protocol):
@@ -112,6 +139,7 @@ _KIND: dict[type, str] = {
     SyncRequest: "sync_req",
     SyncResponse: "sync_resp",
     Hello: "hello",
+    Heartbeat: "heartbeat",
 }
 
 
@@ -122,7 +150,9 @@ def _payload_to_json(p: Payload) -> dict[str, Any]:
         return {"clock": p.clock.to_dict(), "reciprocate": p.reciprocate}
     if isinstance(p, SyncResponse):
         return {"changes": [c.to_json() for c in p.changes], "clock": p.clock.to_dict()}
-    return {}
+    if isinstance(p, Heartbeat):
+        return {"sent_at": p.sent_at, "pong": p.pong}
+    return {"role": p.role}
 
 
 def _payload_from_json(kind: str, body: dict[str, Any]) -> Payload:
@@ -136,7 +166,12 @@ def _payload_from_json(kind: str, body: dict[str, Any]) -> Payload:
             VectorClock.from_dict(body["clock"]),
         )
     if kind == "hello":
-        return Hello()
+        role = body["role"]
+        if role not in ("node", "relay"):
+            raise ValueError(f"unknown role {role!r}")
+        return Hello(role)
+    if kind == "heartbeat":
+        return Heartbeat(float(body["sent_at"]), bool(body["pong"]))
     raise ValueError(f"unknown message type {kind!r}")
 
 

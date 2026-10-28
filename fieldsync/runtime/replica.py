@@ -94,7 +94,7 @@ class Replica:
                 self._offer(change)
         elif isinstance(p, SyncRequest):
             self._answer_sync(env.src, p)
-        # Hello is only meaningful to the relay.
+        # Hello and Heartbeat are handled by the network layer (relay / WsTransport).
 
     def anti_entropy(self) -> None:
         """One periodic anti-entropy round: ask one peer (round-robin) what we're missing."""

@@ -1,11 +1,13 @@
 """Replica runtime shared by the simulator and network mode: replica, messages, trace."""
 
+from fieldsync.runtime.log import CausalLog, answer_sync
 from fieldsync.runtime.replica import Replica
 from fieldsync.runtime.trace import TraceEvent
 from fieldsync.runtime.transport import (
     BROADCAST,
     ChangeMsg,
     Envelope,
+    Heartbeat,
     Hello,
     SyncRequest,
     SyncResponse,
@@ -16,14 +18,17 @@ from fieldsync.runtime.transport import (
 
 __all__ = [
     "BROADCAST",
+    "CausalLog",
     "ChangeMsg",
     "Envelope",
+    "Heartbeat",
     "Hello",
     "Replica",
     "SyncRequest",
     "SyncResponse",
     "TraceEvent",
     "Transport",
+    "answer_sync",
     "decode",
     "encode",
 ]
