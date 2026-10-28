@@ -49,10 +49,12 @@ Until then, the simulator can be driven from Python:
 uv run python -c "
 from fieldsync.sim import Simulation
 sim = Simulation(['A', 'B'])
-sim.edit('A', 0, insert='hello')
-sim.edit('B', 0, insert='world ')
+rec = sim.create_record('A', 'Kasese visit', 'visit_report')
 sim.settle()
-print(sim.texts(), 'converged:', sim.converged())
+sim.edit('A', rec, 0, insert='hello')
+sim.edit('B', rec, 0, insert='world ')
+sim.settle()
+print(sim.record_ids(), sim.texts(rec), 'converged:', sim.converged())
 "
 ```
 
@@ -60,10 +62,10 @@ print(sim.texts(), 'converged:', sim.converged())
 
 ```
 fieldsync/crdt/      pure CRDT logic: ids, clocks, ops, rga, diff (frozen; owner approval to change)
-fieldsync/runtime/   replica runtime, messages + Transport, trace (shared by sim and net)
+fieldsync/runtime/   causal log, replica (records + RGAs), messages + Transport, trace
 fieldsync/sim/       deterministic scheduler, simulated network, Simulation facade
 tests/               mirrors the package layout
-docs/                DEVLOG.md, DECISIONS.md, assignment.pdf
+docs/                INTERFACES.md (frozen API), DEVLOG.md, DECISIONS.md, assignment.pdf
 ```
 
 ## 6. Working rules
