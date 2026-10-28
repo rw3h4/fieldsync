@@ -1,9 +1,9 @@
 [project]
-name = "collab-editor"
+name = "fieldsync"
 version = "0.1.0"
-description = "Distributed collaborative text editor built on an RGA sequence CRDT (Distributed Systems course project)"
+description = "FieldSync: fault-tolerant collaborative records editor (RGA CRDT, relays with failover). Distributed Systems course project."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = []
 
 [dependency-groups]
@@ -22,7 +22,7 @@ packages = ["fieldsync"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

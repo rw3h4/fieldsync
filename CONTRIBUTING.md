@@ -1,0 +1,77 @@
+# Contributing to FieldSync
+
+## 1. Install uv
+
+FieldSync uses [uv](https://docs.astral.sh/uv/) for Python, dependencies and commands.
+
+```bash
+# Linux / macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+You don't need to install Python yourself: uv downloads the version pinned in
+`.python-version` (3.12).
+
+## 2. Clone and install
+
+```bash
+git clone git@github.com:rw3h4/fieldsync.git
+cd fieldsync
+uv sync            # creates .venv with Python 3.12 and the dev tools
+```
+
+## 3. Run the checks
+
+These three must pass before every commit (CI runs the same on every push and PR):
+
+```bash
+uv run ruff check .
+uv run ruff format --check .     # `uv run ruff format .` fixes formatting
+uv run pytest
+```
+
+## 4. Run the app
+
+The runnable apps arrive with their milestones:
+
+| Command | What | Milestone |
+|---|---|---|
+| `uv run relay --id A --port 8765 ...` | Relay server | M2 |
+| `uv run node --id brian --port 8081 ...` | Editor node (opens a page on localhost) | M2 |
+| `uv run sim` | Simulator UI | M3 |
+| `uv run loadgen` | Load generator | M4 |
+
+Until then, the simulator can be driven from Python:
+
+```bash
+uv run python -c "
+from fieldsync.sim import Simulation
+sim = Simulation(['A', 'B'])
+sim.edit('A', 0, insert='hello')
+sim.edit('B', 0, insert='world ')
+sim.settle()
+print(sim.texts(), 'converged:', sim.converged())
+"
+```
+
+## 5. Layout
+
+```
+fieldsync/crdt/      pure CRDT logic: ids, clocks, ops, rga, diff (frozen; owner approval to change)
+fieldsync/runtime/   replica runtime, messages + Transport, trace (shared by sim and net)
+fieldsync/sim/       deterministic scheduler, simulated network, Simulation facade
+tests/               mirrors the package layout
+docs/                DEVLOG.md, DECISIONS.md, assignment.pdf
+```
+
+## 6. Working rules
+
+- Read `PROJECT_BRIEF.md` and `CLAUDE.md`. Interfaces frozen at the end of M1
+  (messages, `Transport`, replica runtime API) change only with owner approval.
+- Work on a branch, keep commits small, and prefix messages with the milestone:
+  `M2: relay failover on heartbeat timeout`.
+- Never add a library that implements CRDT / conflict-resolution logic.
+- Everything must run on one laptop over localhost.
+- Record design decisions in `docs/DECISIONS.md` and progress in `docs/DEVLOG.md`.
