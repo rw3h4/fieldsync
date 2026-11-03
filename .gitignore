@@ -19,3 +19,7 @@ node*.json
 results/raw/
 
 .env
+
+# Network-mode data (relay and node JSONL logs)
+data/
+*.jsonl
