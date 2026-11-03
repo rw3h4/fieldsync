@@ -4,7 +4,15 @@ version = "0.1.0"
 description = "FieldSync: fault-tolerant collaborative records editor (RGA CRDT, relays with failover). Distributed Systems course project."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "nicegui>=3.19.0",
+    "websockets>=17.4",
+]
+
+[project.scripts]
+relay = "fieldsync.net.relay:main"
+node = "fieldsync.ui.node.app:main"
+sim = "fieldsync.ui.sim.app:main"
 
 [dependency-groups]
 dev = [
