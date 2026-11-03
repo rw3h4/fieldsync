@@ -192,3 +192,22 @@ Also frozen, because the M3 UI reads them:
 - `SimNetwork` read API: `latency`, `jitter`, `hold`, `messages`, `observers`, `replica_ids`,
   `peers_of`, `link`, `groups()`, `is_online`, `connected`, `held()`, `in_flight()`.
 - `Scheduler`: `now`, `rng`, `step()`, `run_until()`, `next_time`, `has_foreground`.
+
+---
+
+## Shared but not frozen (M2): documented for M3 and M4
+
+These may still evolve. Changes are coordinated between Brian and Aijuka rather than needing owner approval.
+
+- `fieldsync.ui.components.editor.RecordEditor(replica, record_id=None, *, label="")`: a NiceGUI
+  textarea bound to one record of any `Replica`. `.record`, `.set_record(id | None)`,
+  `.refresh()`. It refreshes itself on `apply` trace events for its record and keeps the cursor
+  via `fieldsync.ui.components.cursor.anchors` / `restore`.
+- `fieldsync.net.node.Node(node_id, relay_urls, *, data_file=None, anti_entropy_interval=2.0,
+  heartbeat_interval=1.0, heartbeat_timeout=3.0, backoff=None, now=time.time)`: a headless node.
+  `.replica`, `.transport`, `.status` (`ClientStatus`), `.started_at`, `await .start()`,
+  `await .stop()`, `.set_offline(bool)`.
+- `fieldsync.net.relay.Relay(relay_id, *, log_file=None, peer_urls=(), anti_entropy_interval=2.0,
+  heartbeat_interval=1.0, heartbeat_timeout=3.0)`: `await .start(host, port) -> port`,
+  `await .stop()`, `.connect_peer(url)`, `.pause()` / `.resume()`, `.log`, `.stats`, `.node_ids`.
+- `fieldsync.net.client.ClientStatus(state, url, relay_id, rtt_ms, failovers, since)`.

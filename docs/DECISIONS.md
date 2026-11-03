@@ -104,3 +104,85 @@ Entries dated 2026-10-17 were made in v1 Phases 1–2 and backfilled during M0.
 - **Reason:**
   - A relay must tell nodes (forward to them) from peer relays (sync with them) on the same port.
   - Application heartbeats work in the simulator too, and the echoed time gives the round-trip time for M4.
+
+### D16. Relay = CausalLog behind a WebSocket server; it answers sync itself
+- **Date:** 2026-11-03 (M2)
+- **Decision:** The relay reuses `CausalLog` and `answer_sync` unchanged and holds no documents. A `SyncRequest` is always answered by the relay and **never forwarded**. Relay IDs follow the replica-ID rule (`relay_a`, `relay_b`).
+- **Alternatives:** Forward sync requests to all nodes; the relay runs a full `Replica`.
+- **Reason:** Forwarding syncs would multiply one node's sync into a storm. Sharing the log code means relay and node can't disagree on causality, and "relays never merge" stays literally true.
+
+### D17. Forward first-sight changes once, never duplicates
+- **Date:** 2026-11-03 (M2; extended by owner decision)
+- **Decision:** A relay forwards a change, as a ChangeMsg, only when `offer` returns `delivered` or `buffered`. This applies whether the change arrived as a ChangeMsg or inside a SyncResponse. It goes once to every other node and each peer relay ID, never back to its source.
+- **Alternatives:** Forward ChangeMsgs only; forward everything.
+- **Reason:**
+  - Duplicates stopping at the first relay that has seen them makes forwarding loops impossible for any relay topology. A three-relay test proves this; with two relays, source exclusion alone would hide the bug.
+  - Forwarding changes learned through sync gets rescued changes to other nodes in milliseconds after a failover.
+
+### D18. Relay peering
+- **Date:** 2026-11-03 (M2)
+- **Decision:** For each `--peer` URL a relay connects as a client with `Hello("relay")`, using the same heartbeat and backoff client as nodes. It syncs with the peer on every (re)connect and every 2 s. Both relays may name each other; forwarding is de-duplicated per peer ID.
+- **Alternatives:** A shared database; primary/backup replication of the log.
+- **Reason:** It is the same anti-entropy protocol nodes use, with no new consistency mechanism. Either relay can serve any node.
+
+### D19. Append-only JSON Lines persistence (relays and nodes)
+- **Date:** 2026-11-03 (M2)
+- **Decision:** One `Change` per line, appended on delivery or on local append, then flushed. Reload = offer the saved changes in order. A damaged last line is skipped. No `fsync`.
+- **Alternatives:** Rewrite a JSON snapshot per change; SQLite; `fsync` per line.
+- **Reason:**
+  - Appending costs O(1) per change and the file is already in causal order.
+  - Flushing survives a killed process. An OS crash may lose the last lines, but other replicas still hold those changes and anti-entropy restores them (documented limit).
+
+### D20. Heartbeat failover, try-next-then-backoff, no flapping back
+- **Date:** 2026-11-03 (M2)
+- **Decision:** The node pings every 1 s. With no pong for 3 s, or a closed socket, the relay is dead and the node tries the next relay at once. After a full round of failures it backs off exponentially (0.5 s doubling, cap 10 s, ±10 % jitter). The node stays on the relay that works; after failing over to B it does not return to A when A comes back. websockets' built-in pings are off.
+- **Alternatives:** Always prefer A (flap back); rely on TCP or websockets keepalive.
+- **Reason:**
+  - Flapping would cause extra failovers and syncs for no gain, since B is as good as A.
+  - An explicit application heartbeat detects hung relays (`kill -STOP`), not just closed sockets. It also gives the RTT shown in the status bar.
+
+### D21. Offline sends are dropped; the op log is the outbox
+- **Date:** 2026-11-03 (M2)
+- **Decision:** While disconnected, `WsTransport.send` drops messages. On every (re)connect the node calls `replica.on_reconnect()`, so the relay pulls whatever it lacks.
+- **Alternatives:** Queue unsent messages and replay them.
+- **Reason:**
+  - A queue would duplicate what the op log already holds and could grow without bound.
+  - The sync path is already tested and is idempotent. A test shows that removing this sync loses outage edits.
+
+### D22. One asyncio event loop, no threads
+- **Date:** 2026-11-03 (M2)
+- **Decision:** In `uv run node` the `Node` runs on NiceGUI's loop (`app.on_startup`). The transport's reader, the anti-entropy timer and UI handlers all call the synchronous `Replica` from that loop.
+- **Alternatives:** The network in a background thread with locks.
+- **Reason:** No locks and no races on replica state. The code stays readable for the examiner.
+
+### D23. Headless `Node` core
+- **Date:** 2026-11-03 (M2)
+- **Decision:** `fieldsync/net/node.py` combines replica, transport, persistence and the anti-entropy timer, with no UI import. The NiceGUI page is a thin layer on top.
+- **Alternatives:** Build the node inside the UI app.
+- **Reason:** Network tests and the M4 load generator run many nodes in one process without a browser.
+
+### D24. Editor cursor anchored to CRDT element IDs
+- **Date:** 2026-11-03 (M2)
+- **Decision:** `RecordEditor` stores the selection as `RGA.id_before` anchors and restores it with `RGA.index_after` after a remote change. A small JS helper sets the selection.
+- **Alternatives:** Keep integer cursor indices.
+- **Reason:** Integer indices jump when a remote edit lands before the cursor. Element IDs never move.
+
+### D25. Manual Offline switch on the node page
+- **Date:** 2026-11-03 (M2; owner decision)
+- **Decision:** `Node.set_offline(bool)` drops the connection and pauses reconnects. The status bar shows `OFFLINE (manual)`.
+- **Alternatives:** Demo FR4 by stopping both relays.
+- **Reason:** It shows one field officer without signal while others keep working, and it makes the offline tests simple.
+
+### D26. Trace time is wall-clock seconds in network mode
+- **Date:** 2026-11-03 (M2; owner amendment)
+- **Decision:** `Node(..., now=time.time)` passes wall-clock seconds into `TraceEvent.time`. The page shows times relative to the node's start. The `TraceEvent` type is unchanged.
+- **Alternatives:** Seconds since each node started.
+- **Reason:** M4 measures sync latency (edit on one node → applied on every other), which needs timestamps comparable across processes. All processes run on one laptop, so they share a clock.
+
+### D27. Node and relay IDs must be unique per device (operating rule)
+- **Date:** 2026-11-03 (M2; owner amendment)
+- **Decision:** Every running node and relay needs its own ID. **A node restarted without its data file must take a new ID.**
+- **Alternatives:** Have the relay reject duplicate IDs.
+- **Reason:**
+  - Two live nodes with one ID, or a node that lost its log and restarted at seq 1, would reuse change IDs (dots). Other replicas would treat different edits as duplicates, and convergence breaks.
+  - The relay can't tell a legitimate reconnect from a duplicate, so this is documented as an operating rule rather than enforced in code. The M2 smoke test hit this by accident when restarting a helper node with no data file.

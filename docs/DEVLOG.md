@@ -88,3 +88,72 @@
 - `RGA.apply(op: Op)`: since `Op` now includes `CreateRecord`, the annotation is wider than what `RGA` handles. The replica never passes a `CreateRecord` to an RGA (creates go to the registry). `rga.py` was left frozen and unchanged; this is noted here instead.
 
 **Deviations:** none from the approved plan, apart from the extra cross-origin test found by mutation check 1.
+
+## M2: network mode (2026-11-03)
+
+**Before M2:** golden wire-format test fixed. Fixtures are now built inside the test and each case builds only its own envelope, so a broken data type fails those cases instead of crashing collection (`73ca348`). Step 0 (`ab9f64a`, pushed for M3): nicegui 3.19 and websockets 17.4 dependencies; `relay`/`node`/`sim` entry points; empty `net/`, `ui/node/`, `ui/sim/`, `ui/components/` packages with owners.
+
+**Done** (every commit pushed to origin/main after ruff, format and pytest passed)
+- `ui/components/editor.py` + `cursor.py`: the shared `RecordEditor` with CRDT-anchored cursor. Built first and pushed for Aijuka.
+- `net/store.py`: append-only JSONL `ChangeStore`.
+- `net/client.py`: `ReconnectingClient`:
+  - `Hello(role)`;
+  - heartbeat ping every 1 s, dead after 3 s without a pong, RTT from the echo;
+  - try the next relay at once; capped exponential backoff after a full failed round;
+  - no flapping back; manual offline.
+- `net/ws_transport.py`: the frozen `Transport` on top of it.
+- `net/relay.py`: `Relay`:
+  - `CausalLog` reuse; answers `sync_req` itself and never forwards it;
+  - first-sight forwarding (including changes learned through sync) to other nodes and each peer relay once;
+  - JSONL log; peer links with sync on connect and every 2 s;
+  - `pause()` hook; CLI.
+- `net/node.py`: headless `Node` with sync on every (re)connect, JSONL replay, an anti-entropy timer, and a wall-clock `now`.
+- `ui/node/`: the page (status bar, record list + New record dialog, editor, event log, Offline switch) and `uv run node`.
+- Frozen code untouched: `git diff ab9f64a -- fieldsync/crdt fieldsync/runtime fieldsync/sim` is empty.
+
+**Deviations from the approved plan**
+- Commit order: client/WsTransport came before the relay, because the relay uses the client for peer links.
+- One extra test (the relay triangle), found by mutation check 1.
+- The node page has no automated UI test. The planned optional NiceGUI `User` smoke test needs pytest-asyncio, which we chose not to add, so the page was checked by real-process smoke tests instead (below).
+
+**Tests added: 22** (95 → 117)
+- cursor anchoring: 4;
+- store: 5;
+- backoff: 2;
+- network: 11, all real WebSockets on 127.0.0.1 in one event loop:
+  - convergence over one relay;
+  - relay kill failover with outage edits;
+  - heartbeat-timeout failover;
+  - changes rescued from a dead relay;
+  - relay restart serving a late joiner;
+  - node restart keeping offline edits;
+  - 2-relay and 3-relay no-loop;
+  - no sync_req forwarding;
+  - no flap-back;
+  - all relays down, then back.
+- Failover tests run nodes without periodic anti-entropy, so recovery must come from sync-on-reconnect.
+- **Flakiness check:** `tests/net` passed 5 of 5 consecutive runs, both before and after the triangle test was added (about 4.7 s per run).
+
+**Mutation checks** (each restored afterwards; suite green again)
+1. *Broke:* the relay forwards duplicates too (the `duplicate` early return removed).
+   - *Result at first: not caught.* All 17 network tests passed. With two relays, "never send back to the source" alone already stops a direct A↔B bounce.
+   - *Fix:* added `test_no_forwarding_loop_in_relay_triangle`. Three fully peered relays form a cycle that only the duplicate rule breaks. Under the mutation it fails with 154 forwards against a bound of 44, and nothing stops circulating.
+   - My first reading of this run was wrong: I thought the tests hung. In fact my grep looked for pytest's `=====` summary banner, which `-q` suppresses, so a fully green run printed nothing.
+2. *Broke:* `Node` no longer syncs on (re)connect.
+   - *Caught by:* `test_relay_kill_failover_keeps_outage_edits`, `test_changes_only_on_dead_relay_rescued_via_nodes`, `test_relay_restart_from_jsonl_serves_late_joiner`, `test_node_restart_keeps_offline_edits`, `test_all_relays_down_then_back`.
+3. *Broke:* the relay forwards each `sync_req` to its other nodes.
+   - *Caught by:* `test_relay_never_forwards_sync_requests`.
+4. *Broke:* relay and node skip the JSONL replay on start.
+   - *Caught by:* `test_relay_restart_from_jsonl_serves_late_joiner`, `test_node_restart_keeps_offline_edits`.
+
+**Real-process smoke test** (2 relays + 2 `uv run node` UIs + a headless driver node, on spare ports)
+- Pages served, titled `FieldSync · brian` / `FieldSync · aijuka`.
+- The driver's record and edit reached both UI nodes and both relays (2 lines in each JSONL).
+- After killing `relay_a`, both UI nodes logged `lost ws://localhost:18765, failing over`. The next edits reached both UI nodes through `relay_b` (4 lines each).
+- No errors in any log; clean shutdown.
+
+**Problems hit**
+- Two test bugs, fixed before commit: a node edited a record before receiving it, and a predicate indexed an empty history.
+- **Duplicate-ID hazard:** the smoke test restarted the driver node with the same ID and no data file, so it started again at seq 1. It only worked because its startup sync arrived before its first edit. This became the second half of the D27 operating rule: a node that lost its data file must take a new ID.
+
+**Not verified by me:** interactive browser behaviour (typing, the cursor staying in place during remote edits, the New record dialog, the Offline switch). I have no browser automation available here. The page renders and data flows through the UI processes, but the README demo steps need a human run-through.

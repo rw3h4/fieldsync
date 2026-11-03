@@ -34,12 +34,13 @@ uv run pytest
 
 ## 4. Run the app
 
-The runnable apps arrive with their milestones:
+Network mode is runnable now (see README, "Run network mode"); the rest arrive with their
+milestones:
 
 | Command | What | Milestone |
 |---|---|---|
-| `uv run relay --id A --port 8765 ...` | Relay server | M2 |
-| `uv run node --id brian --port 8081 ...` | Editor node (opens a page on localhost) | M2 |
+| `uv run relay --id relay_a --port 8765 ...` | Relay server | M2 (done) |
+| `uv run node --id brian --port 8081 ...` | Editor node (serves a page on localhost) | M2 (done) |
 | `uv run sim` | Simulator UI | M3 |
 | `uv run loadgen` | Load generator | M4 |
 
@@ -64,6 +65,8 @@ print(sim.record_ids(), sim.texts(rec), 'converged:', sim.converged())
 fieldsync/crdt/      pure CRDT logic: ids, clocks, ops, rga, diff (frozen; owner approval to change)
 fieldsync/runtime/   causal log, replica (records + RGAs), messages + Transport, trace
 fieldsync/sim/       deterministic scheduler, simulated network, Simulation facade
+fieldsync/net/       relay, reconnecting client, WsTransport, headless Node, JSONL store
+fieldsync/ui/        NiceGUI: node page, shared components (RecordEditor), sim UI (M3)
 tests/               mirrors the package layout
 docs/                INTERFACES.md (frozen API), DEVLOG.md, DECISIONS.md, assignment.pdf
 ```
