@@ -260,3 +260,41 @@ def test_all_relays_down_then_back() -> None:
         await stop_all(a, relay)
 
     run(scenario)
+
+
+def test_no_forwarding_loop_in_relay_triangle() -> None:
+    """With three fully peered relays a change can travel A->B->C->A; only the
+    "never forward a duplicate" rule stops it. (With two relays, "never send back
+    to the source" alone already prevents a direct bounce, so this needs three.)"""
+
+    async def scenario() -> None:
+        relays, urls = [], []
+        for rid in ("relay_a", "relay_b", "relay_c"):
+            relay, url = await start_relay(rid, anti_entropy_interval=0.2)
+            relays.append(relay)
+            urls.append(url)
+        for relay, own in zip(relays, urls, strict=True):
+            for url in urls:
+                if url != own:
+                    relay.connect_peer(url)
+        await wait_until(
+            lambda: all(link.status.relay_id for r in relays for link in r._peers_out),
+            what="triangle links up",
+        )
+        a = await start_node("brian", [urls[0]])
+        c = await start_node("hq", [urls[2]])
+        rec = a.replica.create_record("triangle", "case_note")
+        for i in range(10):
+            a.replica.edit(rec, 0, insert=str(i))
+        await wait_until(lambda: converged([a, c]), what="converged over the triangle")
+        total = len(a.replica.history)
+        await wait_until(lambda: all(r.log.clock == a.replica.clock for r in relays))
+
+        # Per change: the first relay sends to 2 peers, each other relay to at most 1.
+        assert sum(r.stats["fwd_peer"] for r in relays) <= 4 * total
+        before = [r.stats["fwd_peer"] for r in relays]
+        await asyncio.sleep(1.0)
+        assert [r.stats["fwd_peer"] for r in relays] == before  # nothing circulates
+        await stop_all(a, c, *relays)
+
+    run(scenario)
