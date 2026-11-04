@@ -32,6 +32,8 @@ uv run ruff format --check .     # `uv run ruff format .` fixes formatting
 uv run pytest
 ```
 
+Browser end-to-end tests (`tests/e2e`, marked `e2e`) are skipped unless Chromium is installed: run `uv run playwright install chromium` once, then `uv run pytest -m e2e`.
+
 ## 4. Run the app
 
 Network mode is runnable now (see README, "Run network mode"); the rest arrive with their

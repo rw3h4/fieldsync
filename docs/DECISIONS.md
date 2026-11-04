@@ -186,3 +186,16 @@ Entries dated 2026-10-17 were made in v1 Phases 1–2 and backfilled during M0.
 - **Reason:**
   - Two live nodes with one ID, or a node that lost its log and restarted at seq 1, would reuse change IDs (dots). Other replicas would treat different edits as duplicates, and convergence breaks.
   - The relay can't tell a legitimate reconnect from a duplicate, so this is documented as an operating rule rather than enforced in code. The M2 smoke test hit this by accident when restarting a helper node with no data file.
+
+### D28. Editor ↔ browser cursor sync: positions travel with their text
+- **Date:** 2026-11-04 (M2 follow-up)
+- **Decision:**
+  - The editor sends JavaScript to its own tab (`textarea.client.run_javascript`), never through `ui.run_javascript`, because remote changes arrive on a background task with no page context.
+  - Selection is reported only on user actions (keyup, click), never on `select`, which our own `setSelectionRange` fires.
+  - Each report carries the browser's text. The server ignores a report whose text isn't the replica's current text, and keeps its anchors.
+  - Each restore sent to the browser carries the text it was computed for. The browser applies only the newest restore, once the textarea shows that text.
+  - UI observers catch their own exceptions, so a display error can't escape into the replica's causal delivery.
+- **Alternatives:**
+  - Integer positions with a delay (`setTimeout`): racy, and this was the failing design.
+  - Sending the selection with every keystroke: more traffic, same race.
+- **Reason:** A cursor index only means something in the text it was measured in. While remote edits are in flight, the browser's text lags the replica's, so unpaired indices land in the wrong place.

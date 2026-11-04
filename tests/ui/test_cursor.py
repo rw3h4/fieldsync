@@ -44,3 +44,41 @@ def test_caret_at_start_stays_at_start() -> None:
     for op in b.local_insert(0, "new "):
         a.apply(op)
     assert restore(a, sel) == (0, 0)
+
+
+def test_remote_delete_before_cursor_keeps_it_in_the_same_word() -> None:
+    a, b = synced_pair("alpha bravo charlie")
+    sel = anchors(a, 15, 15)  # caret inside "charlie", after "cha"
+    for op in b.local_delete(6, 6):  # delete "bravo " (anchor char not deleted)
+        a.apply(op)
+    assert a.text() == "alpha charlie"
+    assert restore(a, sel) == (9, 9)  # still after "cha"
+
+
+def test_remote_delete_after_cursor_leaves_it() -> None:
+    a, b = synced_pair("alpha bravo charlie")
+    sel = anchors(a, 3, 3)
+    for op in b.local_delete(6, 6):
+        a.apply(op)
+    assert restore(a, sel) == (3, 3)
+
+
+def test_remote_delete_range_spanning_the_cursor() -> None:
+    a, b = synced_pair("abcdef")
+    sel = anchors(a, 3, 3)  # caret after "abc": anchored to "c"
+    for op in b.local_delete(1, 4):  # delete "bcde", around the caret
+        a.apply(op)
+    assert a.text() == "af"
+    assert restore(a, sel) == (1, 1)  # between "a" and "f"
+
+
+def test_selection_survives_remote_delete_before_and_insert_after() -> None:
+    a, b = synced_pair("alpha bravo charlie delta")
+    sel = anchors(a, 12, 19)  # "charlie" selected
+    for op in b.local_delete(0, 6):  # delete "alpha "
+        a.apply(op)
+    for op in b.local_insert(len(b.text()), "!"):
+        a.apply(op)
+    start, end = restore(a, sel)
+    assert (start, end) != (start, start)
+    assert a.text()[start:end] == "charlie"

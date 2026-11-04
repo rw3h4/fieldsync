@@ -5,6 +5,8 @@ the left; the open record's editor (FR3) in the middle; the event log at the
 bottom. The Offline switch (FR4 demo) disconnects this node's transport.
 """
 
+import logging
+
 from nicegui import ui
 
 from fieldsync.crdt import RecordKind
@@ -15,6 +17,8 @@ from fieldsync.ui.components.editor import RecordEditor
 
 KIND_LABELS: dict[RecordKind, str] = {"visit_report": "Visit report", "case_note": "Case note"}
 LOG_LINES = 200
+
+log = logging.getLogger(__name__)
 
 
 def connection_text(status: ClientStatus) -> str:
@@ -126,9 +130,14 @@ class NodePage:
         self.failovers.set_text(f"failovers {status.failovers}")
 
     def _on_trace(self, event: TraceEvent) -> None:
-        self.log.push(format_event(event, self.node.started_at))
-        if len(self.replica.list_records()) != self._known_records:
-            self._refresh_records()
+        # Runs inside the replica's causal delivery (often on the transport's task):
+        # a display error must not escape into it.
+        try:
+            self.log.push(format_event(event, self.node.started_at))
+            if len(self.replica.list_records()) != self._known_records:
+                self._refresh_records()
+        except Exception:
+            log.exception("node page update failed")
 
     def _detach(self) -> None:
         if self._on_trace in self.replica.observers:

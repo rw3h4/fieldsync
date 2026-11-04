@@ -157,3 +157,44 @@
 - **Duplicate-ID hazard:** the smoke test restarted the driver node with the same ID and no data file, so it started again at seq 1. It only worked because its startup sync arrived before its first edit. This became the second half of the D27 operating rule: a node that lost its data file must take a new ID.
 
 **Not verified by me:** interactive browser behaviour (typing, the cursor staying in place during remote edits, the New record dialog, the Offline switch). I have no browser automation available here. The page renders and data flows through the UI processes, but the README demo steps need a human run-through.
+
+## M2 follow-up (2026-11-04)
+
+**JSONL line endings:** `ChangeStore` opens its file with `newline="\n"`, so data files are LF on every OS. Added `test_file_uses_lf_line_endings_on_every_os`, which checks the written bytes contain no `\r`. It passes on Linux even without the fix; it guards the Windows CI job.
+
+**Bug (owner's manual browser check): a remote delete before the cursor sends it to the end of the text**
+- *Steps:* two nodes with the same record open. Node 2's cursor is inside a word; node 1 deletes text before that word. Node 2's cursor jumps to the end of the text.
+- *Reproduced in a real browser first:* added Playwright (dev dependency) and `tests/e2e/test_editor_cursor.py`. It starts a relay and two `uv run node` processes on spare ports and drives two Chromium pages with the keyboard. Before the fix all three e2e tests failed:
+  - delete before cursor: got `(19, 19)` (end of text), expected `(9, 9)`;
+  - insert before cursor: got `(29, 29)`, expected `(19, 19)`. The insert case failed too in automation, although it looked fine by hand.
+  - selection kept through a remote delete: got `(19, 19)`, expected `(6, 13)`.
+- *Root cause 1, the browser hand-off (as the owner suspected; not `cursor.py` or the RGA):*
+  - Remote changes are applied on the transport's reader task. `RecordEditor.refresh()` set the textarea value, then called `ui.run_javascript`, which needs a NiceGUI page context. On a background task it raised `RuntimeError: slot stack is empty`.
+  - The value had already changed, so the browser put the caret at the end (its default), and the restore never ran.
+  - The exception also propagated up through the replica's observer into `CausalLog.offer`. That skipped the observers after the editor (the page's event log) and stopped the causal-buffer drain for that offer.
+  - It was logged in the node's console as `error handling node1#3 ... del 6`.
+- *Fix 1:* send the JavaScript through the editor's own client (`self.textarea.client.run_javascript`). Both UI observers (editor and node page) now catch and log their own exceptions.
+- *Root cause 2, found by running the e2e tests 10 times after fix 1 (the insert test failed 2/10):*
+  - When node 1 types "NEW ", four remote changes arrive in quick succession.
+  - `setSelectionRange` fires a `select` event, so each restore reported a position back to the server. The server re-anchored that position against its newer document, even though it was measured in the browser's older text, so the anchors drifted (to 17, 28, ...).
+  - A restore could also run before the textarea showed the text it was computed for.
+  - Instrumenting the page (a log of restore calls and textarea values) showed both.
+- *Fix 2 (D28):*
+  - Selection reports carry the browser's text and are ignored unless it equals the replica's text.
+  - Restores carry their text. The browser applies only the newest one, once the textarea shows that text (retrying per animation frame, up to 60 frames).
+- *Root cause 3, found under load:*
+  - After fix 2, the full suite (and the e2e tests with 4 busy-loop CPU hogs) still failed the insert test occasionally: 1 in 5 full-suite runs, and once within 3 and once within 7 loaded runs.
+  - Instrumentation (every textarea value assignment and `setSelectionRange`) caught it. The helper's `setSelectionRange(17)` queues a `select` event. The next remote value then arrives, and the browser moves the caret to the end (28). Only then does the `select` event fire, reporting 28.
+  - At that moment the browser's text equals the replica's, so the text check accepted it, and the cursor was anchored to the end.
+- *Fix 3:* track the selection only from user actions (`keyup`, `click`), not from `select`, which our own restores trigger.
+- *After:*
+  - e2e under the same CPU load: 0 failures in 15 runs;
+  - full suite (125 tests including e2e): 5 of 5 green;
+  - the delete case gives `(9, 9)`, and the insert case confirms nothing regressed.
+- *Unit tests:* the cursor logic was never at fault, but the missing cases were added: remote delete before the cursor (anchor kept), remote delete after the cursor, a delete range spanning the cursor, and a non-empty selection surviving a remote delete plus insert.
+- *e2e tests* are marked `e2e` and skip themselves when Playwright's Chromium isn't installed, so CI (and machines without browsers) are unaffected.
+- *Test-suite interaction:* a session-scoped Playwright fixture kept its event loop alive and broke `asyncio.run` in the later `tests/net` tests (11 failures). The browser fixture is now module-scoped.
+- *Known limits:*
+  - The cursor anchor is updated only on keyup and click. A report taken while a remote edit is in flight is ignored, and the next restore uses the previous anchor, at most one keystroke stale.
+  - A selection made only with the context menu ("Select all") isn't tracked until the next key or click.
+  - If a remote value lands between a key's keydown and keyup, that keyup can report the browser's end-of-text caret. I haven't seen this in testing.
