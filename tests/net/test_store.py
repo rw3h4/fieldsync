@@ -21,6 +21,17 @@ def test_append_then_load_round_trip(tmp_path) -> None:
     assert len(path.read_text().splitlines()) == 2
 
 
+def test_file_uses_lf_line_endings_on_every_os(tmp_path) -> None:
+    path = tmp_path / "log.jsonl"
+    store = ChangeStore(path)
+    for c in changes():
+        store.append(c)
+    store.close()
+    data = path.read_bytes()
+    assert b"\r" not in data
+    assert data.count(b"\n") == 2
+
+
 def test_reload_into_causal_log_restores_clock(tmp_path) -> None:
     store = ChangeStore(tmp_path / "log.jsonl")
     for c in changes():

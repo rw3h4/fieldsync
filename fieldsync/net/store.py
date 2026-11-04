@@ -24,7 +24,8 @@ class ChangeStore:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = self.path.open("a", encoding="utf-8")
+        # newline="\n": LF on every OS, so data files are byte-identical across platforms.
+        self._file = self.path.open("a", encoding="utf-8", newline="\n")
 
     def load(self) -> list[Change]:
         """All saved changes in saved order.
