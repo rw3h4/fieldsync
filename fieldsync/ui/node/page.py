@@ -47,6 +47,9 @@ class NodePage:
         with ui.header().classes("items-center gap-4 bg-slate-800"):
             ui.label(f"FieldSync · {node.id}").classes("text-lg font-bold")
             self.connection = ui.label().classes("font-mono")
+            self.persist_warning = ui.label().classes(
+                "font-bold text-white bg-red-600 px-2 rounded"
+            )
             ui.space()
             self.offline = ui.switch("Offline", on_change=lambda e: node.set_offline(bool(e.value)))
         with ui.row().classes("w-full gap-6 font-mono text-sm text-slate-600"):
@@ -122,6 +125,13 @@ class NodePage:
         status = self.node.status
         self.connection.set_text(connection_text(status))
         self.offline.set_value(status.state == "manual_offline")
+        error = status.persist_error
+        self.persist_warning.set_visibility(error is not None)
+        if error is not None:
+            since = error.since - self.node.started_at  # same time base as the event log
+            self.persist_warning.set_text(
+                f"DATA FILE WRITE FAILING since {since:.1f}s: {error.message}"
+            )
         self.clock.set_text(f"clock {self.replica.clock}")
         self.pending.set_text(f"pending {len(self.replica.pending)}")
         record = self.editor.record

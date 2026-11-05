@@ -212,4 +212,6 @@ These may still evolve. Changes are coordinated between Brian and Aijuka rather 
 - `fieldsync.net.relay.Relay(relay_id, *, log_file=None, peer_urls=(), anti_entropy_interval=2.0,
   heartbeat_interval=1.0, heartbeat_timeout=3.0)`: `await .start(host, port) -> port`,
   `await .stop()`, `.connect_peer(url)`, `.pause()` / `.resume()`, `.log`, `.stats`, `.node_ids`.
-- `fieldsync.net.client.ClientStatus(state, url, relay_id, rtt_ms, failovers, since)`.
+- `fieldsync.net.client.ClientStatus(state, url, relay_id, rtt_ms, failovers, since, persist_error=None)`.
+  `persist_error` is a `PersistError(message, since)` while the node's data file is failing to
+  write; only `Node.status` fills it in (D29).

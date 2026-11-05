@@ -206,3 +206,17 @@
   - `test_crdt_errors_still_raise_with_observers_attached`: an exception from the RGA's `apply` still propagates out of `receive`.
 - *Mutation check:* with the `try/except` removed, the first test fails with `RuntimeError: observer bug` raised out of `receive` when the create arrives. Restored afterwards.
 - *Note:* `Node._persist_new` (the data-file writer) is also an observer. If writing fails it is now logged instead of raised; `_saved` isn't advanced, so the next event retries the write.
+
+## M4 checkpoint 1b: loud data-file write failures (2026-11-05)
+- *Why:* after D29 a failing data-file write (the node's persistence observer) was only logged by the replica. The owner asked for it to be loud.
+- *Done:*
+  - `Node._persist_new` catches `OSError` itself. It logs at ERROR (node ID, how many changes are unsaved, the error) and records `PersistError(message, since)`, where `since` is the first failure of the current run.
+  - `Node.status` returns the transport's `ClientStatus` with `persist_error` filled in.
+  - The node page shows a red "DATA FILE WRITE FAILING since …s: …" label in the header while it is set.
+  - `_saved` doesn't advance on failure, so the next trace event retries from the first unsaved change. The error clears (logged at WARNING) once everything is written.
+- *Test:* `tests/net/test_node_persist.py`. The store raises `OSError(ENOSPC)` on its first two appends. Creating a record fires two events (`create`, `send`), and both writes fail. The status shows the error with one `since`, the file is empty, and two ERROR lines are logged. The next edit writes both changes and the error clears. After stopping, the file loads back to exactly the node's history.
+- *Mutation checks:*
+  - Advancing `_saved` past a failed change (skip instead of retry): the test fails, because the next event finds nothing to write and the error clears too early.
+  - Never clearing the error: the test fails at `seen[2] == ("edit", None)`.
+  - Both were restored afterwards.
+- *Known limit:* if the OS fails part-way through a line, the retry appends a full copy after the partial line. On reload that partial line sits mid-file, and `ChangeStore.load` treats it as corruption. A duplicate *full* line would be harmless, because the causal log ignores duplicates. Not fixed here: `ChangeStore` is shared with the relays.

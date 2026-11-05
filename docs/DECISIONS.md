@@ -207,3 +207,6 @@ Entries dated 2026-10-17 were made in v1 Phases 1–2 and backfilled during M0.
   - Rely on each observer catching its own errors (D28 does this for the UI): one forgotten `try` in new code brings the bug back.
   - Catch everything in `receive`: that would also hide real CRDT and causal-log bugs.
 - **Reason:** Root cause 1 of the cursor bug (D28) was a UI observer exception escaping through `_apply` into `CausalLog.offer`, which stopped delivery of the buffered chain. Observers are outside code; the replica's state must not depend on them.
+- **Also:**
+  - `_emit` loops over a copy of `observers` (owner-approved). An observer that removes itself during the call (a closing UI page) used to make the next observer be skipped for that event.
+  - The node's data-file writer (`Node._persist_new`) stays an observer, but its failures are loud (owner decision). An `OSError` is logged at ERROR and shown in `Node.status.persist_error` (`PersistError(message, since)`, a new optional field of `ClientStatus`). The node page shows a red "DATA FILE WRITE FAILING" label until a write succeeds. The unsaved changes are retried on every later trace event, oldest first, so the file stays complete and in causal order.

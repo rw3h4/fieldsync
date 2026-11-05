@@ -49,6 +49,14 @@ State = Literal["connecting", "connected", "offline", "manual_offline"]
 
 
 @dataclass(frozen=True)
+class PersistError:
+    """The node's data file is failing to write (set by ``Node``, never by the client)."""
+
+    message: str  # the last error
+    since: float  # wall-clock time of the first failure in this run of failures
+
+
+@dataclass(frozen=True)
 class ClientStatus:
     """What the status bar shows (FR5)."""
 
@@ -58,6 +66,7 @@ class ClientStatus:
     rtt_ms: float | None = None  # last heartbeat round-trip time
     failovers: int = 0  # times a working relay died and we moved on
     since: float = 0.0  # wall-clock time of the last state change
+    persist_error: PersistError | None = None  # Node fills this in; see Node.status
 
 
 class Backoff:
