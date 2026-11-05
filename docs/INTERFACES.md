@@ -129,6 +129,8 @@ class Replica:
     def waiting_on(self, change: Change) -> dict[str, int]
 ```
 
+- Observer exceptions are logged and isolated; they never affect delivery.
+
 ## 6. Trace events (`fieldsync/runtime/trace.py`)
 
 ```python

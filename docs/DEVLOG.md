@@ -198,3 +198,11 @@
   - The cursor anchor is updated only on keyup and click. A report taken while a remote edit is in flight is ignored, and the next restore uses the previous anchor, at most one keystroke stale.
   - A selection made only with the context menu ("Select all") isn't tracked until the next key or click.
   - If a remote value lands between a key's keydown and keyup, that keyup can report the browser's end-of-text caret. I haven't seen this in testing.
+
+## M4 checkpoint 1: runtime hardening (2026-11-05)
+- *Done (D29, owner-approved change to frozen internals):* `Replica._emit` isolates each observer call. An exception is logged (`fieldsync.runtime.replica`, with the observer and the event); the remaining observers and the delivery continue. The loop iterates over a copy of `observers`, so an observer that removes itself (a closing UI page) doesn't make the next one get skipped.
+- *Tests:*
+  - `test_failing_observer_does_not_stop_delivery_of_a_buffered_chain`: B has an always-raising observer plus a recording one. Six changes from A arrive newest first (all buffered), then the create releases the chain. B ends with A's text, history (same dots, same order) and clock, nothing pending, and the second observer saw every `apply`.
+  - `test_crdt_errors_still_raise_with_observers_attached`: an exception from the RGA's `apply` still propagates out of `receive`.
+- *Mutation check:* with the `try/except` removed, the first test fails with `RuntimeError: observer bug` raised out of `receive` when the create arrives. Restored afterwards.
+- *Note:* `Node._persist_new` (the data-file writer) is also an observer. If writing fails it is now logged instead of raised; `_saved` isn't advanced, so the next event retries the write.

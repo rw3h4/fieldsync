@@ -199,3 +199,11 @@ Entries dated 2026-10-17 were made in v1 Phases 1–2 and backfilled during M0.
   - Integer positions with a delay (`setTimeout`): racy, and this was the failing design.
   - Sending the selection with every keystroke: more traffic, same race.
 - **Reason:** A cursor index only means something in the text it was measured in. While remote edits are in flight, the browser's text lags the replica's, so unpaired indices land in the wrong place.
+
+### D29. Replica isolates observer failures
+- **Date:** 2026-11-05 (owner-approved change to frozen runtime internals; public interface unchanged)
+- **Decision:** `Replica._emit` calls each observer inside its own `try/except Exception`. A failure is logged with the observer and the event, and the other observers and the causal delivery carry on. Only the observer calls are guarded: errors from the CRDT or the causal log still raise.
+- **Alternatives:**
+  - Rely on each observer catching its own errors (D28 does this for the UI): one forgotten `try` in new code brings the bug back.
+  - Catch everything in `receive`: that would also hide real CRDT and causal-log bugs.
+- **Reason:** Root cause 1 of the cursor bug (D28) was a UI observer exception escaping through `_apply` into `CausalLog.offer`, which stopped delivery of the buffered chain. Observers are outside code; the replica's state must not depend on them.

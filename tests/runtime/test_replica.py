@@ -242,3 +242,53 @@ def test_edit_by_another_replica_waits_for_the_create() -> None:
 def test_invalid_replica_id_rejected() -> None:
     with pytest.raises(ValueError):
         make("field-office", [])
+
+
+def test_failing_observer_does_not_stop_delivery_of_a_buffered_chain(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Root cause 1 of the cursor bug (D28): a UI observer raised inside _apply
+    # and the exception aborted the causal log's delivery loop.
+    a, ta = make("A", ["B"])
+    b, _ = make("B", ["A"])
+    rec = a.create_record("notes", "case_note")
+    envs = ta.take()
+    for i, ch in enumerate("hello"):
+        a.edit(rec, i, insert=ch)
+        envs += ta.take()
+    a.edit(rec, 0, delete=1)
+    envs += ta.take()
+
+    seen: list[str] = []
+
+    def broken(_event: object) -> None:
+        raise RuntimeError("observer bug")
+
+    b.observers.append(broken)
+    b.observers.append(lambda e: seen.append(e.kind))  # runs after the broken one
+
+    deliver(envs[:0:-1], b)  # everything but the create, newest first: all buffered
+    assert len(b.pending) == len(envs) - 1
+    deliver(envs[:1], b)  # the create releases the whole chain
+
+    assert b.text(rec) == a.text(rec) == "ello"
+    assert b.pending == []
+    assert b.clock == a.clock
+    assert [c.dot for c in b.history] == [c.dot for c in a.history]
+    assert seen.count("apply") == len(envs)  # later observers still ran every time
+    assert "observer bug" in caplog.text
+
+
+def test_crdt_errors_still_raise_with_observers_attached(monkeypatch: pytest.MonkeyPatch) -> None:
+    a, ta = make("A", ["B"])
+    b, _ = make("B", ["A"])
+    rec = shared_record(a, ta, b)
+    b.observers.append(lambda _e: None)
+    a.edit(rec, 0, insert="x")
+
+    def corrupt(_op: object) -> None:
+        raise RuntimeError("crdt bug")
+
+    monkeypatch.setattr(b.document(rec), "apply", corrupt)
+    with pytest.raises(RuntimeError, match="crdt bug"):
+        deliver(ta.take(), b)

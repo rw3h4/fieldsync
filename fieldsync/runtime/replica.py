@@ -20,6 +20,7 @@ no edit is applied before the record it belongs to exists.
 """
 
 import hashlib
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import count
@@ -46,6 +47,8 @@ from fieldsync.runtime.transport import (
     SyncResponse,
     Transport,
 )
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,5 +279,13 @@ class Replica:
             dot=dot,
             record=record,
         )
-        for observer in self.observers:
-            observer(event)
+        # Observers are outside code (UI, persistence, tracing). _emit runs in
+        # the middle of causal delivery, so an observer's exception must not
+        # escape: it would abort the log's delivery loop and leave buffered
+        # changes stuck. Log it and carry on with the other observers. Only the
+        # observer calls are guarded; CRDT and causal-log errors still raise.
+        for observer in list(self.observers):
+            try:
+                observer(event)
+            except Exception:
+                log.exception("trace observer %r failed on %r", observer, event)
