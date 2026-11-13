@@ -210,3 +210,22 @@ Entries dated 2026-10-17 were made in v1 Phases 1–2 and backfilled during M0.
 - **Also:**
   - `_emit` loops over a copy of `observers` (owner-approved). An observer that removes itself during the call (a closing UI page) used to make the next observer be skipped for that event.
   - The node's data-file writer (`Node._persist_new`) stays an observer, but its failures are loud (owner decision). An `OSError` is logged at ERROR and shown in `Node.status.persist_error` (`PersistError(message, since)`, a new optional field of `ClientStatus`). The node page shows a red "DATA FILE WRITE FAILING" label until a write succeeds. The unsaved changes are retried on every later trace event, oldest first, so the file stays complete and in causal order.
+
+### D30. Scripted scenarios have two stages: `setup` pauses at the anomaly, `recover` settles                                                           
+    - **Date:** 2026-11-13 (M3)                                                                                                                             
+    - **Decision:** Each `Scenario` in `fieldsync/sim/scenarios.py` has `setup(seed) -> Simulation`, which stops at the moment the fault or concurrency     
+    anomaly is visible, and `recover(sim) -> bool`, which lifts hold mode, loss, reorder, offline and partitions and then calls `settle()`.                 
+    `Scenario.run(seed)` runs both. The default `recover` is shared by all scenarios.                                                                       
+    - **Alternatives:** One function per scenario that runs straight to convergence.                                                                        
+    - **Reason:** The simulator UI must load a scenario and stop at the interesting state (a buffered change, a partition, dropped messages) so the         
+    presenter can step through it. Headless tests need the same scenario run to the end. Two stages serve both without duplicating the scenario scripts.    
+                                                                                                                                                            
+    ### D31. Space-time diagram is pure-Python SVG, with no plotting library                                                                                
+    - **Date:** 2026-11-13 (M3)                                                                                                                             
+    - **Decision:** `fieldsync/ui/sim/spacetime.py` builds the diagram as an SVG string from `Simulation.messages()` and `Simulation.trace`. It has no UI   
+    imports, so tests parse it with `xml.etree`. The UI shows it with `ui.html(..., sanitize=False)` and the download button sends the same string through  
+    `ui.download.content`.                                                                                                                                  
+    - **Alternatives:** matplotlib (a dev-only dependency today); a JavaScript charting library.                                                            
+    - **Reason:** No new dependency. The on-screen diagram and the exported file are the same string, so the figure in the report matches what was shown.   
+    The renderer is a pure function, so it is testable without a browser. `sanitize=False` is safe here because every dynamic string is passed through      
+    `html.escape`. 

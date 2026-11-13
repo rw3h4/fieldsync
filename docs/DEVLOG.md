@@ -220,3 +220,31 @@
   - Never clearing the error: the test fails at `seen[2] == ("edit", None)`.
   - Both were restored afterwards.
 - *Known limit:* if the OS fails part-way through a line, the retry appends a full copy after the partial line. On reload that partial line sits mid-file, and `ChangeStore.load` treats it as corruption. A duplicate *full* line would be harmless, because the causal log ignores duplicates. Not fixed here: `ChangeStore` is shared with the relays.
+
+## M3: simulator UI, visualisations, scenarios (2026-11-13)                                                                                             
+                                                                                                                                                            
+    **Done**                                                                                                                                                
+    - `fieldsync/sim/scenarios.py`: 7 scripted scenarios (concurrent insert, insert + delete, out-of-order delivery, partition and heal, offline editing,   
+    late joiner, message loss), each with `setup` / `recover` / `run` (D30).                                                                                
+    - `fieldsync/ui/sim/spacetime.py`: SVG space-time diagram (D31).                                                                                        
+    - `fieldsync/ui/sim/page.py` and `app.py`: `uv run sim` with side-by-side replica panes (shared `RecordEditor`), play/pause/step/settle, scenario       
+    selector, latency/drop/reorder/hold controls, partition presets, manual deliver/drop for held messages, pending-buffer view, CRDT element list with     
+    tombstones, trace and message logs, SVG download.                                                                                                       
+    - Frozen paths untouched: `git diff <base-commit> -- fieldsync/crdt fieldsync/runtime fieldsync/net fieldsync/ui/node fieldsync/ui/components` is       
+    `<empty? paste result>`. Existing `fieldsync/sim/*.py` files: `<unchanged? paste result>`.                                                              
+                                                                                                                                                            
+    **Tests added:** `<N>` (`tests/sim/test_scenarios.py` 15, `tests/sim/test_spacetime.py` 3, `tests/sim/test_sim_ui.py` 4 as written). Suite: `<before>`  
+    -> `<after>` passed; ruff check and format clean: `<yes/no>`.                                                                                           
+                                                                                                                                                            
+    **Mutation checks** (to run, then restore; record the real result of each):                                                                             
+    1. *Break:* in `_heal_all` remove `sim.heal()`. *Expect:* `test_every_scenario_diverges_then_converges` fails for `partition_and_heal`. *Result:*       
+    `<paste>`.                                                                                                                                              
+    2. *Break:* in `setup_out_of_order_delivery` deliver `first.id` instead of `second.id`. *Expect:*                                                       
+    `test_out_of_order_delivery_buffers_until_dependency_arrives` fails (nothing buffered). *Result:* `<paste>`.                                            
+    3. *Break:* in `spacetime.py` skip the `dropped` branch. *Expect:* `test_spacetime_svg_renders_dropped_held_and_buffered_states` fails. *Result:*       
+    `<paste>`.                                                                                                                                              
+                                                                                                                                                            
+    **Not verified:** `<state honestly: e.g. "page.py was not exercised in a browser" or describe your manual run>`.                                        
+                                                                                                                                                            
+    **Deviations from the approved plan**                                                                                                                   
+    - `<list any, e.g. changes you made while typing in the code, or "none">`.  
