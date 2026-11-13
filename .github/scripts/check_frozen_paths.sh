@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fail if a PR touches frozen or M2-owned code (owner review required).
 #   - any change under fieldsync/crdt/, runtime/, net/, ui/node/, ui/components/
-#   - any change other than an addition to fieldsync/sim/, except scenarios.py
+#   - any change other than an addition to fieldsync/sim/, except test_scenarios.py
 # Usage: check_frozen_paths.sh <base-ref>   (compares <base-ref>...HEAD)
 set -euo pipefail
 base="${1:?usage: check_frozen_paths.sh <base-ref>}"
