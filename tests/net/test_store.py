@@ -61,3 +61,39 @@ def test_damaged_middle_line_raises(tmp_path) -> None:
 
 def test_new_file_is_empty(tmp_path) -> None:
     assert ChangeStore(tmp_path / "sub" / "new.jsonl").load() == []
+
+
+class HalfWriteFile:
+    """Wraps the store's file: the first write puts half the bytes on disk, then fails."""
+
+    def __init__(self, real) -> None:
+        self._real = real
+        self.failed = False
+
+    def write(self, data) -> int:
+        if not self.failed:
+            self.failed = True
+            self._real.write(data[: len(data) // 2])
+            raise OSError(28, "No space left on device")
+        return self._real.write(data)
+
+    def __getattr__(self, name: str):
+        return getattr(self._real, name)
+
+
+def test_failed_append_leaves_no_partial_line_and_retry_is_clean(tmp_path) -> None:
+    path = tmp_path / "log.jsonl"
+    store = ChangeStore(path)
+    first, second = changes()
+    store.append(first)
+    store._file = HalfWriteFile(store._file)
+
+    with pytest.raises(OSError):
+        store.append(second)
+    assert ChangeStore(path).load() == [first]  # the half line is gone
+
+    store.append(second)  # the caller's retry
+    store.close()
+    assert ChangeStore(path).load() == [first, second]
+    lines = path.read_bytes().split(b"\n")
+    assert lines[-1] == b"" and len(lines) == 3  # two whole lines, nothing broken

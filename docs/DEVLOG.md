@@ -219,7 +219,20 @@
   - Advancing `_saved` past a failed change (skip instead of retry): the test fails, because the next event finds nothing to write and the error clears too early.
   - Never clearing the error: the test fails at `seen[2] == ("edit", None)`.
   - Both were restored afterwards.
-- *Known limit:* if the OS fails part-way through a line, the retry appends a full copy after the partial line. On reload that partial line sits mid-file, and `ChangeStore.load` treats it as corruption. A duplicate *full* line would be harmless, because the causal log ignores duplicates. Not fixed here: `ChangeStore` is shared with the relays.
+- *Known limit (fixed in checkpoint 1c):* if the OS failed part-way through a line, the retry appended a full copy after the partial line. On reload that partial line sat mid-file, and `ChangeStore.load` treated it as corruption.
+
+## M4 checkpoint 1c: banner test, no partial lines in data files (2026-11-05)
+- *Banner:* the red label text now comes from a pure function, `fieldsync.ui.node.page.persist_banner(status, started_at) -> str | None`, which the page displays as given. `tests/ui/test_node_page.py` covers both cases: no error gives no banner, and an error gives the message plus the time since node start.
+- *Partial lines (owner-approved change to M2 code; protects relays too):*
+  - `ChangeStore` now opens its file as unbuffered binary (`"ab"`, `buffering=0`) instead of buffered text. With a buffered text file, the unwritten tail of a failed write can stay in Python's buffer and be flushed later, after a truncate. The bytes on disk are the same as before: UTF-8 JSON with LF endings.
+  - `append` records the file size before writing (the line's start offset). It writes in a loop, because a raw write can be partial. On `OSError` it truncates the file back to that offset and re-raises. If the truncate itself fails, that `OSError` propagates instead, so the caller's loud-error path stays active.
+- *Test:* `test_failed_append_leaves_no_partial_line_and_retry_is_clean`. The file's first write puts half the line on disk, then raises. Afterwards `load()` returns only the earlier change. The retry succeeds, the file holds exactly two whole lines, and `load()` returns both changes in order.
+- *Mutation check:* without the truncate, the retried line is glued onto the half line. That makes one damaged last line, which `load()` skips, so the test fails because the second change is missing. Restored afterwards.
+- *Relay log-file write failures (found while checking the relay case):*
+  - **Before:** `Relay._persist` runs inside `CausalLog._deliver`, and an `OSError` from it escaped through `offer` → `_take` → `_handle` into `_serve`, which only catches `ConnectionClosed`. The change was held in memory, but it was never forwarded, the buffer drain stopped, and the sender's connection handler died (`websockets.server: connection handler failed`), dropping that node. That broke the rule that a write failure can't stop a relay running.
+  - **Fix:** `_persist` catches `OSError`, logs it at ERROR (relay ID, the change, the error) and counts it in `stats["persist_errors"]`. Delivery, forwarding and connections carry on.
+  - **Test:** `tests/net/test_relay_persist.py`. Every relay append fails. Node B still receives node A's create and edit. The relay holds both in memory. Neither node failed over, `hello_node` stays at 2 (nobody reconnected), and two ERROR lines are logged. Run against the old code first, the test failed: B never received the changes, and the connection handler crashed.
+- *Known limit, accepted by the owner (relay persistence has no retry):* a change whose write failed is missing from the relay's file. After a restart from that file, the changes after the gap stay buffered in the relay until a node (or the peer relay) resends the missing one through anti-entropy, which happens on every reconnect. Nodes don't have this problem: they retry (1b).
 
 ## M3: simulator UI, visualisations, scenarios (2026-11-13)                                                                                             
                                                                                                                                                             

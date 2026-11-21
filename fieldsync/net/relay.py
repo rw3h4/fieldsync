@@ -260,8 +260,22 @@ class Relay:
 
     # ============================================================ helpers
     def _persist(self, change: Change) -> None:
+        # Runs inside CausalLog delivery. A failed write must not escape: it
+        # would skip forwarding, stop the buffer drain and drop the sender's
+        # connection. The change stays in memory and is still forwarded; only
+        # the file has a gap. Known limit: no retry. After a restart from the
+        # file, the nodes resend the missing change through anti-entropy.
         if self._store is not None and not self._loading:
-            self._store.append(change)
+            try:
+                self._store.append(change)
+            except OSError as exc:
+                self.stats["persist_errors"] += 1
+                log.error(
+                    "%s: log file write failed, %s not saved (kept in memory): %s",
+                    self.id,
+                    change.summary(),
+                    exc,
+                )
 
     def _envelope(self, payload: Payload, dst: str) -> Envelope:
         return Envelope(f"{self.id}:{next(self._msg_ids)}", self.id, dst, payload)

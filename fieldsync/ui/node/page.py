@@ -34,6 +34,15 @@ def connection_text(status: ClientStatus) -> str:
     return "○ OFFLINE (all relays down, retrying)"
 
 
+def persist_banner(status: ClientStatus, started_at: float) -> str | None:
+    """The red data-file warning for the status bar, or None while writes work (D29)."""
+    error = status.persist_error
+    if error is None:
+        return None
+    since = error.since - started_at  # same time base as the event log
+    return f"DATA FILE WRITE FAILING since {since:.1f}s: {error.message}"
+
+
 def format_event(event: TraceEvent, started_at: float) -> str:
     return f"{event.time - started_at:8.2f}s  {event.kind:<9} {event.detail}  {event.clock}"
 
@@ -125,13 +134,10 @@ class NodePage:
         status = self.node.status
         self.connection.set_text(connection_text(status))
         self.offline.set_value(status.state == "manual_offline")
-        error = status.persist_error
-        self.persist_warning.set_visibility(error is not None)
-        if error is not None:
-            since = error.since - self.node.started_at  # same time base as the event log
-            self.persist_warning.set_text(
-                f"DATA FILE WRITE FAILING since {since:.1f}s: {error.message}"
-            )
+        banner = persist_banner(status, self.node.started_at)
+        self.persist_warning.set_visibility(banner is not None)
+        if banner is not None:
+            self.persist_warning.set_text(banner)
         self.clock.set_text(f"clock {self.replica.clock}")
         self.pending.set_text(f"pending {len(self.replica.pending)}")
         record = self.editor.record
