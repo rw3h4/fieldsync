@@ -23,3 +23,6 @@ results/raw/
 # Network-mode data (relay and node JSONL logs)
 data/
 *.jsonl
+
+# IDE settings
+.idea/
