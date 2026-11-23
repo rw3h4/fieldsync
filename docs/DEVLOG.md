@@ -236,6 +236,9 @@
 
 ## M3: simulator UI, visualisations, scenarios (2026-11-13)
 
+*(Placeholders filled on 2026-11-23 by Brian with facts checked then: counts by `pytest --collect-only` and ruff run in temporary worktrees at
+`5dc5714` and `8932dab`. Anything that could not be checked is marked "not recorded at the time".)*
+
 **Done**
 - `fieldsync/sim/scenarios.py`: 7 scripted scenarios (concurrent insert, insert + delete, out-of-order delivery, partition and heal, offline editing,
 late joiner, message loss), each with `setup` / `recover` / `run` (D30).
@@ -243,24 +246,25 @@ late joiner, message loss), each with `setup` / `recover` / `run` (D30).
 - `fieldsync/ui/sim/page.py` and `app.py`: `uv run sim` with side-by-side replica panes (shared `RecordEditor`), play/pause/step/settle, scenario
 selector, latency/drop/reorder/hold controls, partition presets, manual deliver/drop for held messages, pending-buffer view, CRDT element list with
 tombstones, trace and message logs, SVG download.
-- Frozen paths untouched: `git diff <base-commit> -- fieldsync/crdt fieldsync/runtime fieldsync/net fieldsync/ui/node fieldsync/ui/components` is
-`<empty? paste result>`. Existing `fieldsync/sim/*.py` files: `<unchanged? paste result>`.
+- Frozen paths untouched: `git diff 5dc5714 8932dab -- fieldsync/crdt fieldsync/runtime fieldsync/net fieldsync/ui/node fieldsync/ui/components`
+is empty. Existing `fieldsync/sim/*.py` files: unchanged (only `scenarios.py` was added). `git diff --stat 5dc5714 8932dab` touched only M3
+paths, apart from the guardrail comment in `.github/scripts/check_frozen_paths.sh` and `.idea/`, both since fixed.
 
-**Tests added:** `<N>` (`tests/sim/test_scenarios.py` 15, `tests/sim/test_spacetime.py` 3, `tests/sim/test_sim_ui.py` 4 as written). Suite: `<before>`
--> `<after>` passed; ruff check and format clean: `<yes/no>`.
+**Tests added:** 22 (`tests/sim/test_scenarios.py` 15, `tests/sim/test_spacetime.py` 3, `tests/sim/test_sim_ui.py` 4 as written). Suite: 128
+-> 150 collected (the test run itself was not recorded at the time); ruff check and format clean: yes.
 
 **Mutation checks** (to run, then restore; record the real result of each):
 1. *Break:* in `_heal_all` remove `sim.heal()`. *Expect:* `test_every_scenario_diverges_then_converges` fails for `partition_and_heal`. *Result:*
-`<paste>`.
+not recorded at the time; see M3 follow-up.
 2. *Break:* in `setup_out_of_order_delivery` deliver `first.id` instead of `second.id`. *Expect:*
-`test_out_of_order_delivery_buffers_until_dependency_arrives` fails (nothing buffered). *Result:* `<paste>`.
+`test_out_of_order_delivery_buffers_until_dependency_arrives` fails (nothing buffered). *Result:* not recorded at the time; see M3 follow-up.
 3. *Break:* in `spacetime.py` skip the `dropped` branch. *Expect:* `test_spacetime_svg_renders_dropped_held_and_buffered_states` fails. *Result:*
-`<paste>`.
+not recorded at the time; see M3 follow-up.
 
-**Not verified:** `<state honestly: e.g. "page.py was not exercised in a browser" or describe your manual run>`.
+**Not verified:** not recorded at the time; see M3 follow-up.
 
 **Deviations from the approved plan**
-- `<list any, e.g. changes you made while typing in the code, or "none">`.
+- not recorded at the time; see M3 follow-up.
 
 ## M4 checkpoint (a): load generator, metrics, smoke test (2026-11-23)
 - *Done:*
@@ -328,3 +332,40 @@ tombstones, trace and message logs, SVG download.
 - *Chart problems found by looking at the renders:*
   - The F2 backlog sat at −12, because the record creates' applies were counted. Fixed by counting only edits.
   - A clipped title and a label overlapping the F1b spike were also fixed.
+- *Later chart changes (2026-11-23):* the throughput chart now uses log-log axes, so P1-P3 are no longer crammed into a corner and the P1 label isn't clipped; the diagonal stays. `loadgen-charts --slides` also writes all four charts at 16:9 with large fonts to `results/charts/slides/`.
+- *Pre-fault blips in the F1/F1b timeline:* each is one edit in run 2 only. In F1 (about 14.5 s), one node got the edit 26.5 ms late; in F1b (about 7.5 s), no node did anything for about 42 ms, which points to a short pause of the whole loadgen process. They stay on the chart and are explained in `docs/EVALUATION.md`.
+
+## M3 follow-up (Brian, 2026-11-23)
+Aijuka was unavailable, so the owner took over the must-fixes from the M3 review. Scope: `fieldsync/ui/sim/`, `fieldsync/sim/scenarios.py`, the M3
+tests, README and docs. No frozen path changed.
+
+- *Done:*
+  - **Play speed:** a slider for virtual seconds per tick (0.05-1.0, default 0.15 as before), so Play can run slowly while narrating.
+  - **Startup URL:** `uv run sim` prints `FieldSync simulator: http://127.0.0.1:8080/`. README has a "Run the simulator" section.
+  - **Redraw only on change (D32):** the queue with its Deliver/Drop buttons, the pending lists, the space-time SVG, the logs, the CRDT internals and
+    the record dropdown are rebuilt only when their key changes, not on every 0.2 s tick. Before, the buttons were destroyed and recreated five
+    times a second, so clicks were often lost. Checked by hand: Deliver and Drop work on the first click while Play runs, and the diagram updates
+    straight away.
+  - **Per-panel error guard:** each panel's refresh runs in its own try/except, which logs the exception and shows "view error in <panel>" in that
+    panel only.
+  - **Stage captions and Next (D33):** every scenario has a setup caption and a recover caption. Next runs `recover(sim)` once and switches the
+    caption. `setup` / `recover` / `run` (D30) are unchanged, so no existing scenario test had to change.
+  - **Smaller items:** the message-loss test also asserts that a `sync_resp` was delivered; the partition preset labels are built from their groups
+    (the old "Split A | B,C" left out D, which was in the group); D31 reworded now that matplotlib is in the `eval` group.
+- *Tests:* 161 -> 177. 16 new: change keys (4), panel guard (2), speed label, a caption check per scenario (7), partition labels, stage
+  caption. The URL and `sync_resp` checks were added to existing tests. Ruff clean.
+- *Mutation checks (run now, each restored afterwards and the file checked against git):*
+  1. *Break:* in `_heal_all` remove `sim.heal()`. *Caught by:* `test_every_scenario_diverges_then_converges[partition_and_heal]` and
+     `test_partition_and_heal_merges_both_branches`.
+  2. *Break:* in `setup_out_of_order_delivery` deliver `first.id` instead of `second.id` (the next line's assert changed to match, so setup
+     still runs). *Caught by:* `test_out_of_order_delivery_buffers_until_dependency_arrives`, `test_convergence_badge_and_pending_formatter`,
+     `test_manual_deliver_changes_queue_pending_diagram_and_internals_keys` and `test_spacetime_svg_renders_dropped_held_and_buffered_states`.
+  3. *Break:* in `spacetime.py` skip the `dropped` branch. *Caught by:* `test_spacetime_svg_renders_dropped_held_and_buffered_states`.
+  4. *Break:* leave the message statuses out of `diagram_key`. *Caught by:* `test_manual_drop_changes_queue_and_diagram_keys` (a manual drop
+     moves neither `sim.now` nor the message count, so without statuses the diagram would stay stale).
+  5. *Break:* `run_guarded` never clears the error after a successful refresh. *Caught by:*
+     `test_run_guarded_logs_and_shows_the_error_in_that_panel`.
+- *Known deviation (accepted):* the latency slider writes `sim.network.latency` directly instead of going through a `Simulation` method. The frozen
+  `Simulation` API is unchanged.
+- *Not verified:* the page was checked in a browser by the owner (Deliver/Drop, diagram); the Next button and captions were checked only by tests
+  and by loading the page over HTTP, not clicked through by hand.
