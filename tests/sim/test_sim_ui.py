@@ -13,11 +13,13 @@ from fieldsync.ui.sim.page import (
     format_pending,
     format_trace_event,
     internals_key,
+    partition_label,
     pending_key,
     queue_key,
     render_elements_html,
     run_guarded,
     speed_label,
+    stage_caption,
 )
 
 
@@ -160,3 +162,16 @@ def test_run_guarded_does_not_swallow_keyboard_interrupt() -> None:
 def test_speed_label() -> None:
     assert speed_label(0.15) == "0.15 s/tick ≈ 0.75x real time"
     assert speed_label(1.0) == "1.00 s/tick ≈ 5.00x real time"
+
+
+def test_partition_labels_come_from_the_groups() -> None:
+    assert partition_label([["A"], ["B", "C", "D"]]) == "Split A | B, C, D"
+    assert partition_label([["A", "B"], ["C", "D"]]) == "Split A, B | C, D"
+
+
+def test_stage_caption_follows_the_stage() -> None:
+    scenario = get_scenario("out_of_order_delivery")
+    assert stage_caption(scenario, "setup") == scenario.setup_caption
+    assert stage_caption(scenario, "recover") == scenario.recover_caption
+    assert stage_caption(scenario, None) == ""
+    assert stage_caption(None, "setup") == ""

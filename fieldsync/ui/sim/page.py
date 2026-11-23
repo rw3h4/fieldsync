@@ -14,7 +14,7 @@ from nicegui import ui
 from fieldsync.crdt import HEAD, Element, RecordKind
 from fieldsync.runtime import RecordInfo, Replica, TraceEvent
 from fieldsync.sim import InFlight, Simulation
-from fieldsync.sim.scenarios import SCENARIOS, SCENARIOS_BY_ID
+from fieldsync.sim.scenarios import SCENARIOS, SCENARIOS_BY_ID, Scenario
 from fieldsync.ui.components.editor import RecordEditor
 from fieldsync.ui.sim.spacetime import render_spacetime_svg
 
@@ -23,6 +23,10 @@ KIND_LABELS: dict[RecordKind, str] = {
     "case_note": "Case note",
 }
 JOINER_POOL: tuple[str, ...] = ("A", "B", "C", "D")
+PARTITION_PRESETS: tuple[list[list[str]], ...] = (
+    [["A"], ["B", "C", "D"]],
+    [["A", "B"], ["C", "D"]],
+)
 MAX_LOG_ITEMS = 120
 TICK_S = 0.2  # real seconds between UI ticks
 DEFAULT_SPEED = 0.15  # virtual seconds advanced per tick while playing
@@ -46,6 +50,11 @@ def format_groups(sim: Simulation) -> str:
     if len(groups) <= 1:
         return "Connected: [" + ", ".join(sim.replicas) + "]"
     return "Partitioned: " + " | ".join("[" + ", ".join(g) + "]" for g in groups)
+
+
+def partition_label(groups: list[list[str]]) -> str:
+    """Button label for a partition preset, built from its groups: ``Split A | B, C, D``."""
+    return "Split " + " | ".join(", ".join(g) for g in groups)
 
 
 def format_pending(replica: Replica) -> list[str]:
@@ -168,6 +177,13 @@ def run_guarded(
     return True
 
 
+def stage_caption(scenario: Scenario | None, stage: str | None) -> str:
+    """Caption for the current stage of a loaded scenario ("" when none is loaded)."""
+    if scenario is None or stage is None:
+        return ""
+    return scenario.recover_caption if stage == "recover" else scenario.setup_caption
+
+
 def speed_label(speed: float) -> str:
     """Play speed as virtual seconds per tick and as a multiple of real time."""
     return f"{speed:.2f} s/tick ≈ {speed / TICK_S:.2f}x real time"
@@ -193,6 +209,7 @@ class SimPage:
         self._errors: dict[str, str | None] = {}
         self._error_labels: dict[str, ui.label] = {}
         self.selected_scenario = SCENARIOS[0].id
+        self.stage: str | None = "setup"  # "setup" / "recover" of a loaded scenario, or None
         self.active_record: str | None = None
         self.editors: dict[str, RecordEditor] = {}
         self.sim = SCENARIOS[0].setup(seed)
@@ -300,6 +317,13 @@ class SimPage:
                     "dense color=primary"
                 )
             self.scenario_desc = ui.label().classes("text-xs text-slate-600 mt-1")
+            with ui.row().classes("w-full items-center gap-3 mt-1 no-wrap"):
+                self.next_btn = ui.button(
+                    "Next", icon="arrow_forward", on_click=self._next_stage
+                ).props("dense color=primary")
+                self.caption = ui.label().classes(
+                    "text-sm text-slate-900 bg-sky-50 border border-sky-200 rounded px-2 py-1 grow"
+                )
 
     def _build_network_and_queue_panel(self) -> None:
         with ui.row().classes("w-full items-stretch gap-3 no-wrap"):
@@ -344,14 +368,11 @@ class SimPage:
                 with ui.row().classes("w-full items-center gap-2 mt-2 flex-wrap"):
                     ui.label("Partitions:").classes("text-xs font-semibold text-slate-600")
                     ui.button("Heal all", on_click=self._heal_partition).props("dense outline")
-                    ui.button(
-                        "Split A | B,C",
-                        on_click=lambda: self._apply_partition([["A"], ["B", "C", "D"]]),
-                    ).props("dense outline")
-                    ui.button(
-                        "Split A,B | C",
-                        on_click=lambda: self._apply_partition([["A", "B"], ["C", "D"]]),
-                    ).props("dense outline")
+                    for groups in PARTITION_PRESETS:
+                        ui.button(
+                            partition_label(groups),
+                            on_click=lambda _, g=groups: self._apply_partition(g),
+                        ).props("dense outline")
                     ui.button(
                         "Isolate each",
                         on_click=lambda: self._apply_partition([[r] for r in self.sim.replicas]),
@@ -496,6 +517,7 @@ class SimPage:
         self.play_btn.set_text("Play")
         self.play_btn.props("icon=play_arrow")
         self.selected_scenario = scenario_id
+        self.stage = "setup"
         scenario = SCENARIOS_BY_ID[scenario_id]
         self.sim = scenario.setup(self.seed)
         records = all_known_records(self.sim)
@@ -504,10 +526,21 @@ class SimPage:
         self._sync_knobs_from_sim()
         self._refresh_all()
 
+    def _next_stage(self) -> None:
+        """Move a loaded scenario from its setup stage to its recover stage (D33)."""
+        scenario = SCENARIOS_BY_ID.get(self.selected_scenario)
+        if scenario is None or self.stage != "setup":
+            return
+        scenario.recover(self.sim)
+        self.stage = "recover"
+        self._sync_knobs_from_sim()
+        self._refresh_all()
+
     def _reset_clean(self) -> None:
         self.playing = False
         self.play_btn.set_text("Play")
         self.play_btn.props("icon=play_arrow")
+        self.stage = None  # no scripted scenario loaded
         self.sim = Simulation(("A", "B", "C"), seed=self.seed)
         rec = self.sim.create_record("A", "Kasese outreach", "visit_report")
         self.sim.settle()
@@ -657,9 +690,14 @@ class SimPage:
         self.inflight_badge.set_text(f"in-flight {len(in_flight)} · held {len(held)}")
         self.topology_label.set_text(format_groups(self.sim))
 
-        scenario = SCENARIOS_BY_ID.get(self.selected_scenario)
-        if scenario is not None:
-            self.scenario_desc.set_text(scenario.description)
+        scenario = SCENARIOS_BY_ID.get(self.selected_scenario) if self.stage else None
+        self.scenario_desc.set_text(scenario.description if scenario else "Clean simulation")
+        self.caption.set_text(stage_caption(scenario, self.stage))
+        self.caption.set_visibility(scenario is not None)
+        if self.stage == "setup":
+            self.next_btn.enable()
+        else:
+            self.next_btn.disable()
 
         # Record selector options (rebuilt only when they change, so an open
         # dropdown is not reset by the tick)

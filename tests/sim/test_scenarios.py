@@ -92,6 +92,8 @@ def test_message_loss_repaired_by_anti_entropy() -> None:
 
     assert scenario.recover(sim)
     assert set(sim.texts("A-1").values()) == {"Urgent: ORS packets: 200"}
+    # The repair went through anti-entropy: a sync_resp carried the lost edits.
+    assert any(m.envelope.kind == "sync_resp" and m.status == "delivered" for m in sim.messages())
 
 
 def test_scenarios_registry_covers_all_seven_brief_scenarios() -> None:
@@ -105,3 +107,10 @@ def test_scenarios_registry_covers_all_seven_brief_scenarios() -> None:
         "message_loss",
     }
     assert set(SCENARIOS_BY_ID) == expected
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS, ids=[s.id for s in SCENARIOS])
+def test_every_scenario_has_a_caption_per_stage(scenario) -> None:
+    assert scenario.setup_caption.strip()
+    assert scenario.recover_caption.strip()
+    assert scenario.setup_caption != scenario.recover_caption

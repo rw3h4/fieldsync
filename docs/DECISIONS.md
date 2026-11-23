@@ -227,7 +227,8 @@ presenter can step through it. Headless tests need the same scenario run to the 
 - **Decision:** `fieldsync/ui/sim/spacetime.py` builds the diagram as an SVG string from `Simulation.messages()` and `Simulation.trace`. It has no UI
 imports, so tests parse it with `xml.etree`. The UI shows it with `ui.html(..., sanitize=False)` and the download button sends the same string through
 `ui.download.content`.
-- **Alternatives:** matplotlib (a dev-only dependency today); a JavaScript charting library.
+- **Alternatives:** matplotlib (since M4 in the optional `eval` dependency group, used only by `loadgen-charts`, so the simulator
+would gain a dependency it does not otherwise need); a JavaScript charting library. *(Reworded in the M3 follow-up.)*
 - **Reason:** No new dependency. The on-screen diagram and the exported file are the same string, so the figure in the report matches what was shown.
 The renderer is a pure function, so it is testable without a browser. `sanitize=False` is safe here because every dynamic string is passed through
 `html.escape`.
@@ -244,6 +245,16 @@ diff the element trees; a slower tick.
 - **Reason:** Buttons that exist until something actually changes make manual delivery reliable for a live demo. Statuses are part of the diagram key
 because a manual Deliver or Drop changes a message's status without moving `sim.now` or adding a message. The keys are pure functions, so they are
 tested without a browser.
+
+### D33. Scenario captions per stage, and a Next button that runs `recover` (M3 follow-up, Brian)
+- **Date:** 2026-11-23 (M3 follow-up)
+- **Decision:** `Scenario` gets two optional fields, `setup_caption` and `recover_caption`. The simulator shows the setup caption after a scenario
+loads; its **Next** button runs that scenario's `recover(sim)` once, shows the recover caption and is then disabled until the scenario is reloaded.
+Clean reset has no scenario, so no caption and no Next.
+- **Alternatives:** A list of narrated steps per scenario (each scenario script split into smaller functions); captions kept outside the scenario
+module.
+- **Reason:** It gives the presenter a two-stage narration without touching the scenario scripts or D30's `setup` / `recover` split, so the headless
+tests are unchanged. The captions live next to the scripts they describe, and a test requires both for every scenario.
 
 ### D40. Load generator: relays as child processes, clients in one process, real persistence
 - **Date:** 2026-11-23 (M4)
