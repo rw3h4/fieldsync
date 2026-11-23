@@ -57,3 +57,14 @@ change IDs (D27).
 
 Add `--host 0.0.0.0` (the default) and use the laptop's LAN address in `--relays` to run nodes
 on other machines on the same network.
+
+## Run the simulator
+
+```bash
+uv run sim
+```
+
+Open http://127.0.0.1:8080/ (the address is printed on startup): it shows three in-process
+replicas on a virtual network you control (texts, clocks, causal buffers, in-flight
+messages, a live space-time diagram and the RGA element list), with seven scripted
+scenarios to load and step through.

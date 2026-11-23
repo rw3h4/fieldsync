@@ -5,6 +5,8 @@ The UI displays state and forwards user actions to ``Simulation``; it never
 implements conflict-resolution logic itself.
 """
 
+import logging
+from collections.abc import Callable, Hashable
 from html import escape
 
 from nicegui import ui
@@ -22,6 +24,10 @@ KIND_LABELS: dict[RecordKind, str] = {
 }
 JOINER_POOL: tuple[str, ...] = ("A", "B", "C", "D")
 MAX_LOG_ITEMS = 120
+TICK_S = 0.2  # real seconds between UI ticks
+DEFAULT_SPEED = 0.15  # virtual seconds advanced per tick while playing
+
+log = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------- pure format helpers
@@ -108,6 +114,65 @@ def render_elements_html(elements: tuple[Element, ...] | list[Element]) -> str:
     return '<div class="flex flex-wrap gap-1.5 py-1">' + "".join(chips) + "</div>"
 
 
+# ------------------------------------------------------------ change keys (D32)
+# Each panel is rebuilt only when its key changes, not on every 0.2 s tick.
+# Rebuilding the queue every tick destroyed its Deliver/Drop buttons between a
+# mouse-down and a mouse-up, so clicks were lost.
+def queue_key(sim: Simulation) -> Hashable:
+    """Key of the in-flight/held queue: each message's id and status."""
+    return tuple((m.id, m.status) for m in sim.network.in_flight())
+
+
+def pending_key(replica: Replica) -> Hashable:
+    """Key of one replica's pending causal buffer."""
+    return tuple(format_pending(replica))
+
+
+def diagram_key(sim: Simulation, include_sync: bool) -> Hashable:
+    """Key of the space-time SVG and the logs.
+
+    ``now`` and the message count, plus each message's status (a manual Deliver
+    or Drop changes a status without moving ``now`` or adding a message), the
+    trace length, and the sync-arrows switch.
+    """
+    statuses = tuple(m.status for m in sim.messages())
+    return (sim.now, len(statuses), statuses, len(sim.trace), include_sync)
+
+
+def internals_key(sim: Simulation, record_id: str | None) -> Hashable:
+    """Key of the CRDT internals panel: the open record and each replica's clock."""
+    return (
+        record_id,
+        tuple(
+            (rid, record_id is not None and r.has_record(record_id), tuple(sorted(r.clock.items())))
+            for rid, r in sim.replicas.items()
+        ),
+    )
+
+
+def run_guarded(
+    name: str, refresh: Callable[[], None], show_error: Callable[[str | None], None]
+) -> bool:
+    """Run one panel's refresh; on an exception log it and show a "view error" in that panel.
+
+    Returns ``True`` if the refresh succeeded. One failing panel never stops the
+    others from refreshing.
+    """
+    try:
+        refresh()
+    except Exception as exc:
+        log.exception("simulator view %r failed to refresh", name)
+        show_error(f"view error in {name}: {type(exc).__name__}: {exc}")
+        return False
+    show_error(None)
+    return True
+
+
+def speed_label(speed: float) -> str:
+    """Play speed as virtual seconds per tick and as a multiple of real time."""
+    return f"{speed:.2f} s/tick ≈ {speed / TICK_S:.2f}x real time"
+
+
 def all_known_records(sim: Simulation) -> list[RecordInfo]:
     """Union of records known to any replica in ``sim``, sorted by ``(origin, seq)``."""
     by_id: dict[str, RecordInfo] = {}
@@ -122,7 +187,11 @@ class SimPage:
     def __init__(self, *, seed: int = 0) -> None:
         self.seed = seed
         self.playing = False
+        self.speed = DEFAULT_SPEED
         self.include_sync = True
+        self._keys: dict[str, Hashable] = {}  # last rendered key per panel (D32)
+        self._errors: dict[str, str | None] = {}
+        self._error_labels: dict[str, ui.label] = {}
         self.selected_scenario = SCENARIOS[0].id
         self.active_record: str | None = None
         self.editors: dict[str, RecordEditor] = {}
@@ -132,6 +201,7 @@ class SimPage:
 
         self._build_header()
         self._build_toolbar()
+        self._error_label("replicas")
         self.replica_row = ui.row().classes("w-full items-stretch gap-3 no-wrap overflow-x-auto")
         self._build_network_and_queue_panel()
         self._build_spacetime_panel()
@@ -139,9 +209,24 @@ class SimPage:
 
         self._rebuild_replica_cards()
         self._refresh_all()
-        ui.timer(0.2, self._tick)
+        ui.timer(TICK_S, self._tick)
 
     # --------------------------------------------------------------- builders
+    def _error_label(self, panel: str) -> None:
+        """A hidden red label in ``panel`` that shows that panel's refresh error."""
+        label = ui.label().classes("text-xs font-mono text-red-800 bg-red-100 px-2 py-1 rounded")
+        label.set_visibility(False)
+        self._error_labels[panel] = label
+        self._errors[panel] = None
+
+    def _show_error(self, panel: str, text: str | None) -> None:
+        if self._errors.get(panel) == text:
+            return  # only touch the label when the error state changes
+        self._errors[panel] = text
+        label = self._error_labels[panel]
+        label.set_text(text or "")
+        label.set_visibility(text is not None)
+
     def _build_header(self) -> None:
         with ui.header().classes("items-center gap-3 bg-slate-900 text-white px-4 py-2"):
             ui.label("FieldSync · Simulator").classes("text-lg font-bold tracking-tight")
@@ -164,6 +249,7 @@ class SimPage:
             ui.button("Heal & Settle", icon="healing", on_click=self._heal_and_settle).props(
                 "dense color=teal"
             )
+            self._error_label("header")
 
     def _build_toolbar(self) -> None:
         with ui.card().classes("w-full p-3 bg-slate-50 border border-slate-200"):
@@ -190,6 +276,16 @@ class SimPage:
                 ui.button(
                     "Add late joiner", icon="person_add", on_click=self._add_late_joiner
                 ).props("dense outline")
+                with ui.row().classes("items-center gap-2"):
+                    ui.label("Play speed").classes("text-xs")
+                    ui.slider(
+                        min=0.05,
+                        max=1.0,
+                        step=0.05,
+                        value=self.speed,
+                        on_change=self._on_speed_change,
+                    ).classes("w-40")
+                    self.speed_val = ui.label(speed_label(self.speed)).classes("font-mono text-xs")
                 ui.space()
                 self.record_select = (
                     ui.select(
@@ -268,6 +364,7 @@ class SimPage:
                         "font-semibold text-sm"
                     )
                     self.queue_count = ui.label().classes("font-mono text-xs text-slate-500")
+                self._error_label("queue")
                 self.queue_box = ui.column().classes("w-full gap-1 max-h-44 overflow-y-auto mt-1")
 
     def _build_spacetime_panel(self) -> None:
@@ -285,6 +382,7 @@ class SimPage:
                         icon="download",
                         on_click=self._download_svg,
                     ).props("dense outline")
+            self._error_label("diagram")
             self.spacetime_html = ui.html("", sanitize=False).classes("w-full mt-1")
 
     def _build_internals_and_logs_panel(self) -> None:
@@ -292,8 +390,10 @@ class SimPage:
             ui.label("CRDT internals (RGA element list & tombstones for open record)").classes(
                 "font-semibold text-sm"
             )
+            self._error_label("internals")
             self.internals_box = ui.column().classes("w-full gap-2 mt-1")
 
+        self._error_label("logs")
         with ui.row().classes("w-full items-stretch gap-3 no-wrap"):
             with ui.card().classes("w-1/2 p-3"):
                 ui.label("Replica trace events (newest first)").classes("font-semibold text-sm")
@@ -308,6 +408,9 @@ class SimPage:
 
     # --------------------------------------------------------- replica cards
     def _rebuild_replica_cards(self) -> None:
+        # Called whenever the replica set or the whole Simulation changes:
+        # forget every rendered key so all panels redraw on the next refresh.
+        self._keys.clear()
         self.editors.clear()
         self.replica_row.clear()
         self.card_online: dict[str, ui.switch] = {}
@@ -360,7 +463,7 @@ class SimPage:
 
     def _tick(self) -> None:
         if self.playing:
-            self.sim.advance(0.15)
+            self.sim.advance(self.speed)
         self._refresh_all()
 
     def _step_once(self) -> None:
@@ -462,6 +565,10 @@ class SimPage:
         self.sim.network.latency = val
         self.latency_val.set_text(f"{val:.2f}s")
 
+    def _on_speed_change(self, event: object) -> None:
+        self.speed = float(getattr(event, "value", DEFAULT_SPEED))
+        self.speed_val.set_text(speed_label(self.speed))
+
     def _on_drop_change(self, event: object) -> None:
         val = float(getattr(event, "value", 0.0))
         self.sim.set_drop_rate(val)
@@ -520,7 +627,27 @@ class SimPage:
         self.reorder_switch.set_value(reorder)
 
     # --------------------------------------------------------------- refresh
+    def _changed(self, panel: str, key: Hashable) -> bool:
+        """True (and remember ``key``) if ``panel`` must be redrawn (D32)."""
+        if panel in self._keys and self._keys[panel] == key:
+            return False
+        self._keys[panel] = key
+        return True
+
     def _refresh_all(self) -> None:
+        """Refresh every panel; each is guarded so one failure stays in its panel."""
+        for panel, refresh in (
+            ("header", self._refresh_header),
+            ("replicas", self._refresh_replicas),
+            ("queue", self._refresh_queue),
+            ("diagram", self._refresh_diagram),
+            ("internals", self._refresh_internals),
+            ("logs", self._refresh_logs),
+        ):
+            if not run_guarded(panel, refresh, lambda t, p=panel: self._show_error(p, t)):
+                self._keys.pop(panel, None)  # retry the full redraw next tick
+
+    def _refresh_header(self) -> None:
         self.clock_badge.set_text(f"t = {self.sim.now:.2f}s")
         text, cls = convergence_status(self.sim)
         self.conv_badge.set_text(text)
@@ -534,14 +661,16 @@ class SimPage:
         if scenario is not None:
             self.scenario_desc.set_text(scenario.description)
 
-        # Record selector options
+        # Record selector options (rebuilt only when they change, so an open
+        # dropdown is not reset by the tick)
         records = all_known_records(self.sim)
         rec_opts = {r.id: f"{r.title} ({KIND_LABELS[r.kind]} · {r.id})" for r in records}
         if self.active_record not in rec_opts:
             self.active_record = records[0].id if records else None
-        self.record_select.set_options(rec_opts, value=self.active_record)
+        if self._changed("record_select", (tuple(rec_opts.items()), self.active_record)):
+            self.record_select.set_options(rec_opts, value=self.active_record)
 
-        # Update each replica card
+    def _refresh_replicas(self) -> None:
         converged = self.sim.converged()
         for rid, replica in self.sim.replicas.items():
             self.card_online[rid].set_value(self.sim.network.is_online(rid))
@@ -566,6 +695,8 @@ class SimPage:
                 editor.refresh()
 
             # Pending causal buffer
+            if not self._changed(f"pending:{rid}", pending_key(replica)):
+                continue
             p_box = self.card_pending[rid]
             p_box.clear()
             pending_lines = format_pending(replica)
@@ -578,7 +709,10 @@ class SimPage:
                             "text-xs font-mono bg-amber-100 text-amber-900 px-2 py-0.5 rounded"
                         )
 
-        # In-flight / Held queue
+    def _refresh_queue(self) -> None:
+        if not self._changed("queue", queue_key(self.sim)):
+            return
+        in_flight = self.sim.network.in_flight()
         self.queue_count.set_text(f"{len(in_flight)} active")
         self.queue_box.clear()
         with self.queue_box:
@@ -603,12 +737,16 @@ class SimPage:
                             on_click=lambda _, mid=msg.id: self._drop_msg(mid),
                         ).props("dense size=sm color=red outline")
 
-        # Space-time diagram SVG
+    def _refresh_diagram(self) -> None:
+        if not self._changed("diagram", diagram_key(self.sim, self.include_sync)):
+            return
         self.spacetime_html.set_content(
             render_spacetime_svg(self.sim, include_sync=self.include_sync)
         )
 
-        # CRDT Internals view
+    def _refresh_internals(self) -> None:
+        if not self._changed("internals", internals_key(self.sim, self.active_record)):
+            return
         self.internals_box.clear()
         with self.internals_box:
             if self.active_record is None:
@@ -625,7 +763,9 @@ class SimPage:
                                 "text-xs text-slate-400 italic"
                             )
 
-        # Trace & message logs
+    def _refresh_logs(self) -> None:
+        if not self._changed("logs", diagram_key(self.sim, self.include_sync)):
+            return
         self.trace_box.clear()
         with self.trace_box:
             for ev in reversed(self.sim.trace[-MAX_LOG_ITEMS:]):

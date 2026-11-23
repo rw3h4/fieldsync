@@ -16,9 +16,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def sim_url(args: argparse.Namespace) -> str:
+    """The address the simulator page is served on."""
+    return f"http://{args.host}:{args.port}/"
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
     register(seed=args.seed)
+    print(f"FieldSync simulator: {sim_url(args)}  (Ctrl+C to stop)", flush=True)
     ui.run(
         host=args.host,
         port=args.port,

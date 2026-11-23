@@ -232,6 +232,19 @@ imports, so tests parse it with `xml.etree`. The UI shows it with `ui.html(..., 
 The renderer is a pure function, so it is testable without a browser. `sanitize=False` is safe here because every dynamic string is passed through
 `html.escape`.
 
+### D32. Simulator panels redraw only when their change key changes (M3 follow-up, Brian)
+- **Date:** 2026-11-23 (M3 follow-up)
+- **Decision:** The 0.2 s UI tick still runs, but each panel in `fieldsync/ui/sim/page.py` is rebuilt only when a small key changes: the queue on
+each in-flight message's (id, status); each pending list on its formatted lines; the space-time SVG and the logs on `sim.now`, the message count, the
+message statuses, the trace length and the sync-arrows switch; the CRDT internals on the open record and every replica's clock. Each panel's refresh
+runs in its own try/except that logs the error and shows "view error" in that panel only. Virtual seconds per tick are set by a Play speed slider
+(0.05-1.0, default 0.15 as before).
+- **Alternatives:** Keep rebuilding every tick (Deliver/Drop buttons were destroyed and recreated five times a second, so clicks could be lost);
+diff the element trees; a slower tick.
+- **Reason:** Buttons that exist until something actually changes make manual delivery reliable for a live demo. Statuses are part of the diagram key
+because a manual Deliver or Drop changes a message's status without moving `sim.now` or adding a message. The keys are pure functions, so they are
+tested without a browser.
+
 ### D40. Load generator: relays as child processes, clients in one process, real persistence
 - **Date:** 2026-11-23 (M4)
 - **Decision:**
