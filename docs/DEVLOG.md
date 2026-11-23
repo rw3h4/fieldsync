@@ -314,3 +314,17 @@ tombstones, trace and message logs, SVG download.
 - *Problem hit:* the first trial timed out. My trial script had no `if __name__ == "__main__"` guard, so every "spawn" worker died re-importing it, and the coordinator waited out its whole deadline. The `loadgen` entry point is guarded. The coordinator now notices a worker that died without reporting and fails at once. Clean-up worked in both cases: no relay or worker processes were left behind.
 - *Results (3 runs; `results/summary.md`):* 4459–4585 changes, about 152 of the 160 changes/s offered. p50 5.1–6.0 ms, p95 16.4–22.8 ms, 100% success, all converged, no failovers. The worst worker's loop-lag p95 was 14.8–25.0 ms, so **not harness-limited**. Against single-process P4 (128.5 changes/s, p50 11.7 ms, p95 83.3 ms, harness-limited), most of P4's degradation was the harness.
 - *Not in the CI suite:* the multi-process path takes about 18 s even at its smallest (10 s setup margin), so no test runs it; it was checked by hand with a 2-worker trial.
+
+## M4 checkpoint (c): charts and EVALUATION.md (2026-11-23)
+- *Done:*
+  - `fieldsync/eval/charts.py` (`uv run --group eval loadgen-charts`), with matplotlib in a new `eval` dependency group that CI doesn't install.
+  - Four charts in `results/charts/`: latency vs clients, throughput vs offered load, the F1/F1b timeline with the fault marked, and the F2 backlog.
+  - Derived tables `results/rate_gap.csv` and `results/f2_backlog.csv`.
+  - `docs/EVALUATION.md`: method, results, interpretation, threats to validity, future work and how to reproduce. A pointer was added to README.
+- *Achieved-vs-offered gap, from the per-change data (`rate_gap.csv`):*
+  - P2 and P3 are Poisson noise: the mean gap between a client's edits was 199.8 and 201.2 ms against 200 ms, and |z| ≤ 1.2.
+  - P4-mp is harness scheduling delay: a mean gap of 105.0 ms against 100 ms (SE 0.8 ms, z = −6.6).
+  - Skipped operations are impossible by construction, and the system can't lower the originated rate.
+- *Chart problems found by looking at the renders:*
+  - The F2 backlog sat at −12, because the record creates' applies were counted. Fixed by counting only edits.
+  - A clipped title and a label overlapping the F1b spike were also fixed.

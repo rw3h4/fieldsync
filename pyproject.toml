@@ -15,6 +15,7 @@ node = "fieldsync.ui.node.app:main"
 sim = "fieldsync.ui.sim.app:main"
 loadgen = "fieldsync.eval.loadgen:main"
 loadgen-report = "fieldsync.eval.report:main"
+loadgen-charts = "fieldsync.eval.charts:main"
 
 [dependency-groups]
 dev = [
@@ -22,6 +23,9 @@ dev = [
     "hypothesis>=6.100",
     "ruff>=0.6",
     "playwright>=1.64.1",
+]
+eval = [
+    "matplotlib>=3.11.2",
 ]
 
 [build-system]

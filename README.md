@@ -47,6 +47,9 @@ the same `--id`, and if a node loses its data file, start it with a new ID. Chan
 `(node id, sequence number)`; a reused ID would reuse them and break convergence. The relay
 can't tell a reconnect from a duplicate, so this is not checked in code.
 
+**Performance evaluation (M4):** `uv run loadgen --all`, then `uv run loadgen-report` and
+`uv run --group eval loadgen-charts`. Method, results and interpretation: `docs/EVALUATION.md`.
+
 **Resetting the demo:** stop every process (all relays and nodes), then delete the whole
 `data/` folder. Never delete a single node's file while the relays keep their logs: the
 relays still hold that node's old changes, so a restarted node with the same ID would reuse
