@@ -308,3 +308,9 @@ tombstones, trace and message logs, SVG download.
   - So the P4 limit is the RGA position cache, multiplied by hosting 16 replicas in one process. On real devices each node pays the cost for its own replica only.
   - `rga.py` is frozen and was not changed; the fix (for example, updating positions incrementally) needs owner approval.
 - *Noise found:* F1b run 2 shows backlog-cleared 2.95 s against 0.00 s in runs 1 and 3. One change happened to be in flight to relay_a at the instant of the hang. That's why `restored_s` (D42), which is stable across runs, is the better recovery figure.
+
+## M4 checkpoint (b2): P4-mp (2026-11-23)
+- *Done (D43):* `fieldsync/eval/multiproc.py`, `Spec.workers`, the `workers` column in `runs.csv`, and `base_result` / `window_lag_p95` factored out of `_run` so both paths compute the same metrics. `uv run loadgen --test P4-mp` runs it.
+- *Problem hit:* the first trial timed out. My trial script had no `if __name__ == "__main__"` guard, so every "spawn" worker died re-importing it, and the coordinator waited out its whole deadline. The `loadgen` entry point is guarded. The coordinator now notices a worker that died without reporting and fails at once. Clean-up worked in both cases: no relay or worker processes were left behind.
+- *Results (3 runs; `results/summary.md`):* 4459–4585 changes, about 152 of the 160 changes/s offered. p50 5.1–6.0 ms, p95 16.4–22.8 ms, 100% success, all converged, no failovers. The worst worker's loop-lag p95 was 14.8–25.0 ms, so **not harness-limited**. Against single-process P4 (128.5 changes/s, p50 11.7 ms, p95 83.3 ms, harness-limited), most of P4's degradation was the harness.
+- *Not in the CI suite:* the multi-process path takes about 18 s even at its smallest (10 s setup margin), so no test runs it; it was checked by hand with a 2-worker trial.

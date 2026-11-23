@@ -269,3 +269,15 @@ The renderer is a pure function, so it is testable without a browser. `sanitize=
 - **Reason:**
   - A kill on localhost closes the sockets at once (failover about 60 ms), so it never exercises the heartbeat path. F1b does.
   - The trial runs showed D41's backlog-cleared reads 0.00 s for both relay faults. The changes made *before* the fault had all arrived already. The ones that suffer are those made *during* detection, and `restored_s` captures them.
+
+### D43. P4-mp: the P4 load with the clients spread over 4 worker processes
+- **Date:** 2026-11-23 (M4; owner decision)
+- **Decision:**
+  - `fieldsync/eval/multiproc.py`: a coordinator starts the relays exactly as `loadgen` does (`RelayPair`), then 4 worker processes (multiprocessing "spawn", the same on every OS), each hosting 4 of the 16 clients.
+  - All processes use `time.time()` on one machine (D26). The coordinator hands every worker the same wall-clock start time; client `i` keeps its `loadgen` RNG seed; c00 creates the 4 records.
+  - After the window each worker waits the same fixed drain (10 s), then reports its trace, loop-lag samples and each node's clock and digest. The coordinator checks convergence across all 16 nodes and computes the D41 metrics with the same code (`base_result`).
+  - A run is harness-limited if *any* worker's loop-lag p95 exceeds 50 ms.
+  - Workers are killed, and the relays stopped, in `finally` blocks. A worker that dies without reporting fails the run straight away.
+  - Reported as "P4-mp" next to P4; both are kept.
+- **Alternatives:** One process per client (16 processes): closer to real devices, but 16 Python interpreters on 8 logical CPUs would move the contention instead of removing it.
+- **Reason:** P4 was harness-limited (one loop hosting 16 replicas), so it measured the load generator. Splitting the clients removes that limit while leaving the system under test unchanged.

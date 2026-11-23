@@ -109,6 +109,7 @@ PURPOSE = {
     "P2": "moderate load",
     "P3": "scaling clients",
     "P4": "stress / throughput limit",
+    "P4-mp": "P4 with the clients spread over 4 loadgen processes (D43)",
     "F1": "relay A killed 15 s into a P2 window: failover recovery",
     "F1b": "relay A hung (SIGSTOP) 15 s into a P2 window: heartbeat detection",
     "F2": "half the clients offline from 10 s to 40 s of a 50 s P2 window",

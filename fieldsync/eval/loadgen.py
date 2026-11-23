@@ -77,6 +77,7 @@ class Spec:
     fault: str | None = None  # "kill_relay", "hang_relay" or "offline_half"
     fault_at: float = 0.0  # seconds into the window
     fault_len: float = 0.0  # offline duration (F2)
+    workers: int = 1  # loadgen processes hosting the clients (P4-mp, D43)
 
 
 TESTS: dict[str, Spec] = {
@@ -84,6 +85,7 @@ TESTS: dict[str, Spec] = {
     "P2": Spec("P2", clients=4, rate=5.0),
     "P3": Spec("P3", clients=8, rate=5.0),
     "P4": Spec("P4", clients=16, rate=10.0),
+    "P4-mp": Spec("P4-mp", clients=16, rate=10.0, drain=10.0, workers=4),
     "F1": Spec("F1", clients=4, rate=5.0, fault="kill_relay", fault_at=15.0),
     "F1b": Spec("F1b", clients=4, rate=5.0, fault="hang_relay", fault_at=15.0),
     "F2": Spec(
@@ -125,6 +127,7 @@ class RunResult:
     # F1/F1b: fault -> every change made up to failover-complete is applied
     # everywhere, i.e. including the changes made while the fault was undetected.
     restored_s: float | None = None
+    workers: int = 1  # loadgen processes; a run is harness-limited if any worker's p95 > 50 ms
     # F2 only: latency split by who edited and who received (D42). "on" = the
     # clients that stayed online; "pre" = before the outage, "outage" = during it.
     f2_on_on_pre_p50_ms: float | None = None
@@ -372,16 +375,39 @@ async def _run(
             with contextlib.suppress(Exception):
                 await node.stop()
 
-    window_edits = [e for e in trace.edits if t0 <= e.t < t_end]
-    latencies, expected = pair_latencies(window_edits, trace.applies, ids)
-    recovery = (
-        backlog_cleared(trace.edits, trace.applies, ids, fault_t) if fault_t is not None else None
-    )
-    lag_ms = [s * 1000 for t, s in lag if t0 <= t < t_end]
-    lag_p95 = percentile(lag_ms, 95)
     if raw_dir is not None:
         _write_raw(raw_dir, spec, run, t0, trace)
-    result = RunResult(
+    result = base_result(spec, seed, run, trace, ids, t0, window_lag_p95(lag, t0, t_end))
+    result.converged, result.failovers = converged, failovers
+    window_edits = [e for e in trace.edits if t0 <= e.t < t_end]
+    if fault_t is not None:
+        result.fault_at_s = fault_t - t0
+        result.failover_s = failover_s
+        result.recovery_s = backlog_cleared(trace.edits, trace.applies, ids, fault_t)
+    if failover_s is not None and fault_t is not None:
+        healed_t = fault_t + failover_s
+        cleared = backlog_cleared(trace.edits, trace.applies, ids, healed_t)
+        result.restored_s = failover_s + cleared if cleared is not None else None
+    if fault_t is not None:
+        result.timeline = latency_timeline(window_edits, trace.applies, ids, t0)
+    if outage_t is not None and fault_t is not None:
+        _f2_split(result, window_edits, trace.applies, ids, spec.clients // 2, outage_t, fault_t)
+    return result
+
+
+def window_lag_p95(lag: Sequence[tuple[float, float]], t0: float, t_end: float) -> float:
+    """p95 (ms) of the loop-lag samples taken inside the window."""
+    return percentile([s * 1000 for t, s in lag if t0 <= t < t_end], 95)
+
+
+def base_result(
+    spec: Spec, seed: int, run: int, trace: Trace, ids: Sequence[str], t0: float, lag_p95: float
+) -> RunResult:
+    """The metrics every test has (D41); fault fields are filled in by the caller."""
+    t_end = t0 + spec.window
+    window_edits = [e for e in trace.edits if t0 <= e.t < t_end]
+    latencies, expected = pair_latencies(window_edits, trace.applies, ids)
+    return RunResult(
         test=spec.name,
         run=run,
         seed=seed,
@@ -398,23 +424,15 @@ async def _run(
         pairs_expected=expected,
         pairs_applied=len(latencies),
         success_pct=100 * len(latencies) / expected if expected else float("nan"),
-        converged=converged,
-        failovers=failovers,
-        fault_at_s=fault_t - t0 if fault_t is not None else None,
-        failover_s=failover_s,
-        recovery_s=recovery,
+        converged=False,
+        failovers=0,
+        fault_at_s=None,
+        failover_s=None,
+        recovery_s=None,
         loop_lag_p95_ms=lag_p95,
         harness_limited=lag_p95 > HARNESS_LAG_LIMIT_MS,
+        workers=spec.workers,
     )
-    if failover_s is not None and fault_t is not None:
-        healed_t = fault_t + failover_s
-        cleared = backlog_cleared(trace.edits, trace.applies, ids, healed_t)
-        result.restored_s = failover_s + cleared if cleared is not None else None
-    if fault_t is not None:
-        result.timeline = latency_timeline(window_edits, trace.applies, ids, t0)
-    if outage_t is not None and fault_t is not None:
-        _f2_split(result, window_edits, trace.applies, ids, spec.clients // 2, outage_t, fault_t)
-    return result
 
 
 def _f2_split(
@@ -453,6 +471,10 @@ def run_test(
     spec: Spec, *, seed: int = 1, run: int = 1, raw_dir: Path | None = None, timeout: float = 300.0
 ) -> RunResult:
     """Run one test once, from a fresh temporary directory and fresh relays."""
+    if spec.workers > 1:
+        from fieldsync.eval.multiproc import run_multi  # here: avoids an import cycle
+
+        return run_multi(spec, seed=seed, run=run, raw_dir=raw_dir, timeout=timeout)
     with (
         tempfile.TemporaryDirectory(prefix="fieldsync-loadgen-", ignore_cleanup_errors=True) as tmp,
         RelayPair(Path(tmp)) as relays,
