@@ -12,7 +12,9 @@ One run of one test:
 3. Client 0 creates 4 shared records; wait until every node has them.
 4. Seeded workload: each client edits at rate r (exponential gaps, mean 1/r):
    80% insert 1-3 letters at a random position, 20% delete 1-2 characters.
-   Warm-up, then the measurement window, during which F1/F2 inject their fault.
+   Warm-up, then the measurement window, during which F1/F1b/F2 inject their
+   fault. F1 kills relay A; F1b hangs it with SIGSTOP (POSIX only, D42) so only
+   the missing heartbeats reveal it; F2 takes half the clients offline.
 5. Stop editing, wait (up to ``drain`` s) until all replicas converge, stop the
    nodes and relays, delete the temporary directory.
 6. Compute the metrics (``fieldsync.eval.metrics``, D41) from the trace events
@@ -31,6 +33,7 @@ import csv
 import logging
 import random
 import re
+import signal
 import socket
 import string
 import subprocess
@@ -41,7 +44,14 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
-from fieldsync.eval.metrics import Edit, backlog_cleared, pair_latencies, percentile
+from fieldsync.eval.metrics import (
+    Bucket,
+    Edit,
+    backlog_cleared,
+    latency_timeline,
+    pair_latencies,
+    percentile,
+)
 from fieldsync.net.node import Node
 from fieldsync.runtime import TraceEvent
 
@@ -64,7 +74,7 @@ class Spec:
     warmup: float = 5.0
     window: float = 30.0
     drain: float = 15.0  # max wait for convergence after the window
-    fault: str | None = None  # "kill_relay" or "offline_half"
+    fault: str | None = None  # "kill_relay", "hang_relay" or "offline_half"
     fault_at: float = 0.0  # seconds into the window
     fault_len: float = 0.0  # offline duration (F2)
 
@@ -75,10 +85,13 @@ TESTS: dict[str, Spec] = {
     "P3": Spec("P3", clients=8, rate=5.0),
     "P4": Spec("P4", clients=16, rate=10.0),
     "F1": Spec("F1", clients=4, rate=5.0, fault="kill_relay", fault_at=15.0),
+    "F1b": Spec("F1b", clients=4, rate=5.0, fault="hang_relay", fault_at=15.0),
     "F2": Spec(
         "F2", clients=4, rate=5.0, window=50.0, fault="offline_half", fault_at=10.0, fault_len=30.0
     ),
 }
+# SIGSTOP/SIGCONT exist only on POSIX; F1b is skipped elsewhere (Windows).
+CAN_HANG = hasattr(signal, "SIGSTOP")
 SMOKE = Spec("smoke", clients=2, rate=5.0, warmup=0.5, window=2.0, drain=5.0)
 
 
@@ -106,9 +119,22 @@ class RunResult:
     failovers: int
     fault_at_s: float | None
     failover_s: float | None
-    recovery_s: float | None
+    recovery_s: float | None  # backlog cleared: changes made up to the event (D41)
     loop_lag_p95_ms: float
     harness_limited: bool
+    # F1/F1b: fault -> every change made up to failover-complete is applied
+    # everywhere, i.e. including the changes made while the fault was undetected.
+    restored_s: float | None = None
+    # F2 only: latency split by who edited and who received (D42). "on" = the
+    # clients that stayed online; "pre" = before the outage, "outage" = during it.
+    f2_on_on_pre_p50_ms: float | None = None
+    f2_on_on_pre_p95_ms: float | None = None
+    f2_on_on_outage_p50_ms: float | None = None
+    f2_on_on_outage_p95_ms: float | None = None
+    f2_offline_origin_p50_ms: float | None = None
+    f2_offline_origin_p95_ms: float | None = None
+    # Fault tests: 1 s latency timeline (written to timelines.csv, not runs.csv).
+    timeline: list[Bucket] = field(default_factory=list, repr=False, metadata={"csv": False})
 
 
 @dataclass
@@ -213,9 +239,18 @@ class RelayPair:
         proc.kill()
         proc.wait(timeout=10)
 
+    def hang(self, name: str) -> None:
+        """Freeze the relay (SIGSTOP): its sockets stay open, it just stops answering."""
+        self.procs[name].send_signal(signal.SIGSTOP)
+
+    def resume(self, name: str) -> None:
+        self.procs[name].send_signal(signal.SIGCONT)
+
     def close(self) -> None:
         for proc in self.procs.values():
             if proc.poll() is None:
+                if CAN_HANG:
+                    proc.send_signal(signal.SIGCONT)  # in case it was hung
                 proc.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=10)
@@ -277,7 +312,8 @@ async def _run(
     ids = [n.id for n in nodes]
     tasks: list[asyncio.Task[None]] = []
     lag: list[tuple[float, float]] = []
-    fault_t: float | None = None
+    fault_t: float | None = None  # the event backlog-cleared is measured from
+    outage_t: float | None = None  # F2: when the clients went offline
     failover_s: float | None = None
     try:
         for node in nodes:
@@ -300,9 +336,12 @@ async def _run(
         t0 = time.time() + spec.warmup  # window start
         t_end = t0 + spec.window
         await asyncio.sleep(spec.warmup + spec.fault_at)
-        if spec.fault == "kill_relay":
+        if spec.fault in ("kill_relay", "hang_relay"):
             fault_t = time.time()
-            relays.kill("a")
+            if spec.fault == "kill_relay":
+                relays.kill("a")
+            else:
+                relays.hang("a")
             b = relays.url("b")
             if await _wait_until(
                 lambda: all(n.status.state == "connected" and n.status.url == b for n in nodes),
@@ -310,6 +349,7 @@ async def _run(
             ):
                 failover_s = time.time() - fault_t
         elif spec.fault == "offline_half":
+            outage_t = time.time()
             half = nodes[: spec.clients // 2]
             for node in half:
                 node.set_offline(True)
@@ -318,6 +358,8 @@ async def _run(
             for node in half:
                 node.set_offline(False)
         await asyncio.sleep(max(0.0, t_end - time.time()))
+        if spec.fault == "hang_relay":
+            relays.resume("a")  # clients stay on relay_b (no flapping back, D20)
 
         for task in tasks:
             task.cancel()
@@ -339,7 +381,7 @@ async def _run(
     lag_p95 = percentile(lag_ms, 95)
     if raw_dir is not None:
         _write_raw(raw_dir, spec, run, t0, trace)
-    return RunResult(
+    result = RunResult(
         test=spec.name,
         run=run,
         seed=seed,
@@ -364,6 +406,47 @@ async def _run(
         loop_lag_p95_ms=lag_p95,
         harness_limited=lag_p95 > HARNESS_LAG_LIMIT_MS,
     )
+    if failover_s is not None and fault_t is not None:
+        healed_t = fault_t + failover_s
+        cleared = backlog_cleared(trace.edits, trace.applies, ids, healed_t)
+        result.restored_s = failover_s + cleared if cleared is not None else None
+    if fault_t is not None:
+        result.timeline = latency_timeline(window_edits, trace.applies, ids, t0)
+    if outage_t is not None and fault_t is not None:
+        _f2_split(result, window_edits, trace.applies, ids, spec.clients // 2, outage_t, fault_t)
+    return result
+
+
+def _f2_split(
+    result: RunResult,
+    edits: list[Edit],
+    applies: dict[tuple[str, str], float],
+    ids: list[str],
+    n_offline: int,
+    outage_t: float,
+    reconnect_t: float,
+) -> None:
+    """F2 latency by group (D42).
+
+    - online -> online, before and during the outage: does the outage slow down
+      the clients that stayed connected? (It shouldn't.)
+    - offline origin -> every other node: edits made while offline wait for the
+      reconnect by design.
+    """
+    offline, online = ids[:n_offline], ids[n_offline:]
+
+    def p(es: list[Edit], receivers: list[str], q: float) -> float:
+        return percentile(pair_latencies(es, applies, receivers)[0], q) * 1000
+
+    on_pre = [e for e in edits if e.origin in online and e.t < outage_t]
+    on_outage = [e for e in edits if e.origin in online and outage_t <= e.t < reconnect_t]
+    off_origin = [e for e in edits if e.origin in offline]
+    result.f2_on_on_pre_p50_ms = p(on_pre, online, 50)
+    result.f2_on_on_pre_p95_ms = p(on_pre, online, 95)
+    result.f2_on_on_outage_p50_ms = p(on_outage, online, 50)
+    result.f2_on_on_outage_p95_ms = p(on_outage, online, 95)
+    result.f2_offline_origin_p50_ms = p(off_origin, ids, 50)
+    result.f2_offline_origin_p95_ms = p(off_origin, ids, 95)
 
 
 def run_test(
@@ -398,22 +481,55 @@ def _write_raw(raw_dir: Path, spec: Spec, run: int, t0: float, trace: Trace) -> 
             w.writerow([dot, node, f"{t - t0:.6f}"])
 
 
-def write_runs(path: Path, results: Sequence[RunResult]) -> None:
-    """Upsert rows into runs.csv, keyed by (test, run): re-running replaces old rows."""
-    columns = [f.name for f in fields(RunResult)]
-    rows: dict[tuple[str, str], dict[str, str]] = {}
+RUN_COLUMNS = [f.name for f in fields(RunResult) if f.metadata.get("csv", True)]
+TIMELINE_COLUMNS = ["test", "run", "start_s", "changes", "median_ms", "max_ms"]
+
+
+def _upsert(path: Path, columns: list[str], key: list[str], new: list[dict[str, str]]) -> None:
+    """Rewrite ``path`` with ``new`` rows replacing old rows that have the same ``key``."""
+    rows: list[dict[str, str]] = []
+    replaced = {tuple(r[k] for k in key[:2]) for r in new}  # (test, run)
     if path.exists():
         with path.open(newline="") as f:
-            for row in csv.DictReader(f):
-                rows[(row["test"], row["run"])] = row
-    for r in results:
-        rows[(r.test, str(r.run))] = {k: _fmt(v) for k, v in asdict(r).items()}
+            rows = [r for r in csv.DictReader(f) if (r["test"], r["run"]) not in replaced]
+    rows.extend(new)
+    rows.sort(key=lambda r: tuple(_sort_key(r[k]) for k in key))
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=columns)
+        w = csv.DictWriter(f, fieldnames=columns, restval="", extrasaction="ignore")
         w.writeheader()
-        for key in sorted(rows):
-            w.writerow(rows[key])
+        w.writerows(rows)
+
+
+def _sort_key(value: str) -> tuple[int, float | str]:
+    try:
+        return (0, float(value))
+    except ValueError:
+        return (1, value)
+
+
+def write_runs(path: Path, results: Sequence[RunResult]) -> None:
+    """Upsert rows into runs.csv, keyed by (test, run): re-running replaces old rows."""
+    new = [{k: _fmt(v) for k, v in asdict(r).items() if k in RUN_COLUMNS} for r in results]
+    _upsert(path, RUN_COLUMNS, ["test", "run"], new)
+
+
+def write_timelines(path: Path, results: Sequence[RunResult]) -> None:
+    """Upsert the fault tests' 1 s latency timelines (seconds relative to the window start)."""
+    new = [
+        {
+            "test": r.test,
+            "run": str(r.run),
+            "start_s": _fmt(b.start),
+            "changes": str(b.changes),
+            "median_ms": _fmt(b.median_ms),
+            "max_ms": _fmt(b.max_ms),
+        }
+        for r in results
+        for b in r.timeline
+    ]
+    if new:
+        _upsert(path, TIMELINE_COLUMNS, ["test", "run", "start_s"], new)
 
 
 def _fmt(value: object) -> str:
@@ -432,7 +548,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--out", type=Path, default=Path("results"))
     args = parser.parse_args(argv)
-    names = sorted(TESTS) if args.all else (args.test or parser.error("give --test or --all"))
+    names = list(TESTS) if args.all else (args.test or parser.error("give --test or --all"))
+    if "F1b" in names and not CAN_HANG:
+        print("F1b skipped: hanging a process with SIGSTOP needs Linux or macOS", flush=True)
+        names = [n for n in names if n != "F1b"]
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(name)s %(message)s")
 
     for name in names:
@@ -443,6 +562,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             except KeyboardInterrupt:
                 sys.exit(130)  # relays and the temp dir are already cleaned up
             write_runs(args.out / "runs.csv", [result])
+            write_timelines(args.out / "timelines.csv", [result])
             print(
                 f"  {result.changes} changes, p50 {result.lat_p50_ms:.1f} ms, "
                 f"p95 {result.lat_p95_ms:.1f} ms, success {result.success_pct:.1f}%, "

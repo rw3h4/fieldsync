@@ -258,3 +258,14 @@ The renderer is a pure function, so it is testable without a browser. `sanitize=
   - "All replicas equal" as the convergence moment: under continuous edits it practically never happens at one instant.
   - Relay-side counters for throughput: they need a stats endpoint in the relay, and they're lost when F1 kills relay A.
 - **Reason:** These are the brief's metrics, defined so they still mean something while the load continues and the system is under fault. The loop-lag criterion separates "FieldSync is slow" from "the load generator is saturated".
+
+### D42. F1b (hung relay), F2 latency split, and "restored" time for relay faults
+- **Date:** 2026-11-23 (M4; F1b and the F2 split are owner decisions)
+- **Decision:**
+  - **F1b:** relay_a is frozen with SIGSTOP 15 s into a P2 window. Its sockets stay open, so only the missing heartbeats reveal it. It gets SIGCONT at the end of the window (and before the clean-up kill). F1b reports detection time (hang → every client connected to relay_b), the backlog columns and the 1 s latency timeline. It runs only where SIGSTOP exists (Linux and macOS): `loadgen` skips it on Windows with a message, and no test in the CI suite runs it.
+  - **F2 split:** latency is reported for three groups. (1) Online → online edits before the outage; (2) online → online edits during the outage, which should match (1); (3) edits from the clients that went offline, to every node, which wait for the reconnect by design.
+  - **`restored_s` (F1 and F1b):** the time from the fault until every change made *up to failover-complete* is applied everywhere. It's an extra column; D41's `recovery_s` (backlog cleared) is unchanged.
+- **Alternatives:** For F1b, a relay pause command in the relay itself: that would need a new control channel in M2 code, and SIGSTOP is a truer hang. For F2, one latency distribution: it mixes 2 ms and 30 s edits and hides the result that matters.
+- **Reason:**
+  - A kill on localhost closes the sockets at once (failover about 60 ms), so it never exercises the heartbeat path. F1b does.
+  - The trial runs showed D41's backlog-cleared reads 0.00 s for both relay faults. The changes made *before* the fault had all arrived already. The ones that suffer are those made *during* detection, and `restored_s` captures them.

@@ -279,3 +279,32 @@ tombstones, trace and message logs, SVG download.
 - *Observations for (b):*
   - On localhost a killed relay's sockets close at once, so F1 failover is about 60 ms. The 3 s heartbeat timeout only matters for a hung relay, which F1 does not test.
   - F2's latency distribution mixes online and offline edits. The summary should split them.
+
+## M4 checkpoint (b): preparation (2026-11-23)
+- *Added before the evaluation runs (D42):*
+  - F1b (hung relay via SIGSTOP; POSIX only, skipped on Windows, not in CI).
+  - The F2 latency split (online → online before and during the outage, and offline-origin edits).
+  - `restored_s` for F1 and F1b.
+  - `results/timelines.csv` with 1 s latency buckets for the fault tests.
+  - `uv run loadgen-report` (`fieldsync/eval/report.py`), which writes `results/summary.md` with machine specs, an overview and one table per test.
+- *Tests:* `tests/eval/test_report.py` checks the aggregation and the harness-limited flag.
+- *Trial runs (scratch, one each):*
+  - F1b: detected in 2.94 s and 3.96 s. Within the expected range, because the 3 s timeout counts from the last pong and pings go every 1 s.
+  - F1: failover 0.058 s.
+  - F2: online → online p50 was 2.7 ms before the outage and 1.9 ms during it; offline-origin edits had p50 5.3 s and p95 27.4 s.
+  - Found while trialling: D41's backlog-cleared reads 0.00 s for F1 and F1b. That's why `restored_s` was added.
+
+## M4 checkpoint (b): evaluation runs (2026-11-23)
+- *Setup:* laptop on AC power and idle; owner-confirmed. Specs are in `results/summary.md`: i5-1135G7, 8 logical CPUs, 23 GiB, Python 3.12.14. P1–P3 ran first, and P4 only once they had passed cleanly. Each test ran 3 times with seed 1, 21 runs in total. Every run reached 100% success and converged; no relay processes or temp directories were left behind.
+- *Results (mean over 3 runs; full tables in `results/summary.md`):*
+  - **Latency:** P1 p50 1.8 ms; P2 2.5 ms; P3 3.5 ms (p95 6.1 ms). There were no failovers in any P test, so heartbeats were never starved.
+  - **P4 is harness-limited in all 3 runs** (loop lag p95 74–82 ms > 50 ms). The clients achieved 128.5 of the 160 changes/s offered; p50 was 11.7 ms and p95 83.3 ms. FieldSync still delivered 100% and converged.
+  - **F1 (kill):** failover 0.054–0.058 s, restored in the same time, p95 3.2 ms.
+  - **F1b (hang):** detection 2.94–2.95 s, matching the 3 s heartbeat timeout; restored 2.95–2.96 s. p95 was 1.0–1.5 s, from the edits made during detection.
+  - **F2:** backlog cleared 0.12–0.14 s after the reconnect. Online→online p95 was 3.1–3.4 ms before the outage and 2.3–2.5 ms during it, so the outage didn't slow down the clients that stayed connected. Offline-origin p95 was 27.3–27.9 s, by design.
+- *Profiling P4 (`results/profile_P4.txt`):*
+  - `RGA._position` is 15.4 s of 34.8 s (44%) of the loadgen process. Every insert sets `_positions = None` (`rga.py:105`), and the next insert rebuilds the whole id→index map, tombstones included. So each insert costs O(document size), about 136 µs on average here, and the loadgen pays it 16 times, once per hosted replica.
+  - The relays (separate processes) used only about 4–5% CPU each; they hold no RGA. `missing_for` doesn't show up at this history size.
+  - So the P4 limit is the RGA position cache, multiplied by hosting 16 replicas in one process. On real devices each node pays the cost for its own replica only.
+  - `rga.py` is frozen and was not changed; the fix (for example, updating positions incrementally) needs owner approval.
+- *Noise found:* F1b run 2 shows backlog-cleared 2.95 s against 0.00 s in runs 1 and 3. One change happened to be in flight to relay_a at the instant of the hang. That's why `restored_s` (D42), which is stable across runs, is the better recovery figure.

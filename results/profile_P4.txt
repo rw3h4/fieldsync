@@ -1,0 +1,26 @@
+cProfile of one P4 run (16 clients x 10 edits/s, seed 9), loadgen process only, sorted by internal time.
+Made with cProfile around fieldsync.eval.loadgen.run_test(TESTS['P4']); relays (separate processes) sampled with ps: about 4-5% CPU each, loadgen process 63-89%.
+
+         27686406 function calls (27551708 primitive calls) in 34.781 seconds
+
+   Ordered by: internal time
+   List reduced from 938 to 15 due to restriction <15>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+   113232   15.424    0.000   15.424    0.000 fieldsync/crdt/rga.py:200(_position)
+     9823    3.343    0.000    3.343    0.000 {method 'poll' of 'select.epoll' objects}
+   113488    1.053    0.000   16.617    0.000 fieldsync/crdt/rga.py:90(_integrate_insert)
+    76276    0.646    0.000    0.646    0.000 json/encoder.py:205(iterencode)
+  3273450    0.554    0.000    0.554    0.000 fieldsync/crdt/rga.py:152(<genexpr>)
+    67316    0.451    0.000    0.451    0.000 json/decoder.py:344(raw_decode)
+   143258    0.436    0.000    3.689    0.000 fieldsync/runtime/replica.py:259(_emit)
+369951/369935    0.419    0.000    1.085    0.000 {method 'join' of 'str' objects}
+   143258    0.408    0.000    0.542    0.000 fieldsync/eval/loadgen.py:149(observe)
+  2417590    0.397    0.000    0.397    0.000 {method 'get' of 'dict' objects}
+    66540    0.396    0.000    0.798    0.000 fieldsync/crdt/clocks.py:66(merge)
+  1204435    0.351    0.000    0.579    0.000 fieldsync/crdt/clocks.py:51(get)
+   142754    0.348    0.000    0.836    0.000 fieldsync/crdt/ops.py:140(summary)
+   142528    0.292    0.000    0.475    0.000 fieldsync/crdt/clocks.py:57(items)
+    70976    0.282    0.000    2.208    0.000 fieldsync/net/store.py:59(append)
+
+
