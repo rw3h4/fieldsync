@@ -113,6 +113,13 @@ restored time is the headline figure.
 
 ![Latency around a relay failure](../results/charts/f1_timeline.png)
 
+The two max-latency blips before the fault (about 14.5 s in F1, 7.5 s in F1b) are each one edit
+in run 2 only: in F1, c01's edit `c01#129` reached c00 and c02 in 2–3 ms but c03 only after
+26.5 ms while every node kept working, a one-off delay on the path to that single node; in F1b,
+c00's edit `c00#73` reached all three other nodes after about 44 ms, and no node made or applied
+anything between 7.122 s and 7.164 s, which points to a short pause of the shared loadgen
+process rather than of FieldSync.
+
 **Offline clients (F2):** the backlog cleared **0.12–0.14 s** after the reconnect.
 
 | F2 latency group (mean of 3 runs) | p50 | p95 |
@@ -243,6 +250,7 @@ latencies are FieldSync's own processing cost on one laptop, not harness delay.
 uv run loadgen --all --runs 3            # P1-P4, P4-mp, F1, F1b (Linux/macOS), F2; ~20 min
 uv run loadgen-report                    # results/summary.md
 uv run --group eval loadgen-charts       # results/charts/*.png, rate_gap.csv, f2_backlog.csv
+uv run --group eval loadgen-charts --slides  # also results/charts/slides/*.png (16:9, large fonts)
 ```
 
 Per-change CSVs go to `results/raw/` (not committed). `results/runs.csv` and
