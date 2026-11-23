@@ -261,3 +261,21 @@ tombstones, trace and message logs, SVG download.
 
 **Deviations from the approved plan**
 - `<list any, e.g. changes you made while typing in the code, or "none">`.
+
+## M4 checkpoint (a): load generator, metrics, smoke test (2026-11-23)
+- *Done:*
+  - `fieldsync/eval/loadgen.py` (`uv run loadgen`, D40) and `fieldsync/eval/metrics.py` (D41).
+  - Tests P1–P4, F1 and F2 are defined as in the brief. F1 kills relay_a at 15 s into the window. F2 takes half the clients offline from 10 s to 40 s of a 50 s window.
+  - Output: `results/raw/{test}_{run}_changes.csv` and `_applies.csv`, with times relative to the window start, plus one row per run in `results/runs.csv` (an upsert keyed by test and run).
+  - Approved comment-only fix in `fieldsync/runtime/trace.py`: `TraceEvent.time` is wall-clock in network mode (D26).
+- *Tests:*
+  - `tests/eval/test_metrics.py`: four tests of the metric functions on synthetic events.
+  - `tests/eval/test_loadgen_smoke.py`: a real run with 2 relay processes, 2 clients, 0.5 s warm-up and a 2 s window, bounded at 15 s. It checks 100% success, convergence, no failovers and the CSV upsert. A second test checks both relay processes are dead after an exception inside `RelayPair`. Together they take about 3 s.
+- *Trial runs (one each, not the evaluation):*
+  - P1: p50 1.8 ms, 100%.
+  - F1: all 4 clients failed over in 58 ms, backlog cleared at 0.0 s.
+  - F2: backlog cleared 0.12 s after the reconnect; latency p95 26.8 s, from the offline clients' edits.
+  - No relay processes or temp directories were left behind.
+- *Observations for (b):*
+  - On localhost a killed relay's sockets close at once, so F1 failover is about 60 ms. The 3 s heartbeat timeout only matters for a hung relay, which F1 does not test.
+  - F2's latency distribution mixes online and offline edits. The summary should split them.

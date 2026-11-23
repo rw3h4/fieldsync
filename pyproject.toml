@@ -13,6 +13,7 @@ dependencies = [
 relay = "fieldsync.net.relay:main"
 node = "fieldsync.ui.node.app:main"
 sim = "fieldsync.ui.sim.app:main"
+loadgen = "fieldsync.eval.loadgen:main"
 
 [dependency-groups]
 dev = [

@@ -231,3 +231,30 @@ imports, so tests parse it with `xml.etree`. The UI shows it with `ui.html(..., 
 - **Reason:** No new dependency. The on-screen diagram and the exported file are the same string, so the figure in the report matches what was shown.
 The renderer is a pure function, so it is testable without a browser. `sanitize=False` is safe here because every dynamic string is passed through
 `html.escape`.
+
+### D40. Load generator: relays as child processes, clients in one process, real persistence
+- **Date:** 2026-11-23 (M4)
+- **Decision:**
+  - `uv run loadgen` starts relay_a and relay_b as real child processes (`python -m fieldsync.net.relay`), peered, each with `--log-file`.
+  - N headless `Node` clients run on one asyncio loop in the loadgen process, each with its own data file. All files go in a temporary directory that is deleted after the run.
+  - The relays are killed in a context manager's exit, so they are always cleaned up, also on an exception or Ctrl+C.
+  - The workload is seeded per client: exponential gaps at rate r, 80% inserts of 1–3 letters and 20% deletes of 1–2 characters, spread over 4 shared records. Each run has a 5 s warm-up and a 30 s window (50 s for F2), then a drain of up to 15 s until the replicas converge.
+- **Alternatives:**
+  - Everything in one process: F1 couldn't kill a relay for real.
+  - One process per client: more realistic CPU isolation, but more moving parts, and the trace events would have to be collected across processes.
+  - No persistence: faster, but it would not measure the real system.
+- **Reason:** It measures the real fault-tolerant system (separate relay processes, persistence on) with the least machinery. The weakness, that the clients share one Python process, is measured, not assumed away (D41).
+
+### D41. Evaluation metrics and the harness-limited criterion
+- **Date:** 2026-11-23 (M4; harness criterion set by the owner)
+- **Decision:** All metrics come from wall-clock trace events (D26), computed in `fieldsync/eval/metrics.py`.
+  - **Sync latency:** for each change and each node other than its origin, apply time minus edit time. Reported as median, p95 and max over the window's changes.
+  - **Throughput:** changes originated per second in the window, and ChangeMsgs received by the nodes per second (forwarding counted at the receivers, so the relay needs no instrumentation).
+  - **Success:** the share of (change, other node) pairs applied by the end of the drain, plus whether all clocks and `state_digest`s are equal after the drain.
+  - **Recovery (F1) / convergence (F2):** "backlog cleared", the time from the event (relay kill, or reconnect) until every change made at or before it is applied on every node. F1 also reports failover time (kill → every client connected to relay_b).
+  - **Failovers:** summed over clients. In the P tests a non-zero count means heartbeats were starved under load.
+  - **Harness-limited:** the loadgen loop's lag is sampled every 100 ms. If its p95 in the window exceeds 50 ms, the run is marked `harness_limited` in `runs.csv`, `summary.md` and `EVALUATION.md`, and its limits are not attributed to FieldSync.
+- **Alternatives:**
+  - "All replicas equal" as the convergence moment: under continuous edits it practically never happens at one instant.
+  - Relay-side counters for throughput: they need a stats endpoint in the relay, and they're lost when F1 kills relay A.
+- **Reason:** These are the brief's metrics, defined so they still mean something while the load continues and the system is under fault. The loop-lag criterion separates "FieldSync is slow" from "the load generator is saturated".

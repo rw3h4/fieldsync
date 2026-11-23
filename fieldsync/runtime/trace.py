@@ -18,7 +18,7 @@ EventKind = Literal[
 
 @dataclass(frozen=True, slots=True)
 class TraceEvent:
-    time: float  # virtual time (sim) or seconds since start (network mode)
+    time: float  # virtual time (sim) or wall-clock seconds, time.time() (network mode, D26)
     replica: str
     kind: EventKind
     clock: VectorClock  # the replica's vector clock *after* the event
