@@ -41,7 +41,7 @@ Entries dated 2026-10-17 were made in v1 Phases 1–2 and backfilled during M0.
 - **Alternatives:** Send a CRDT snapshot (element list + clock).
 - **Reason:** Same code path as anti-entropy, so already covered by its tests. A snapshot adds a second sync path with edge cases.
 
-### D7. Relay op log in memory, optionally persisted to JSON
+### D7. Relay op log in memory, optionally persisted to JSON (superseded by D19)
 - **Date:** 2026-10-17
 - **Decision:** The relay keeps its op log in memory; `--log-file` persists and reloads it.
 - **Alternatives:** In memory only.

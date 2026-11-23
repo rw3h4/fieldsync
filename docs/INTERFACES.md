@@ -139,7 +139,7 @@ EventKind = Literal["create", "edit", "send", "receive", "buffer", "apply", "dup
 
 @dataclass(frozen=True, slots=True)
 class TraceEvent:
-    time: float  # virtual time (sim) or seconds since start (network)
+    time: float  # virtual time (sim) or wall-clock seconds, time.time() (network, D26)
     replica: str
     kind: EventKind
     clock: VectorClock  # replica's vector clock after the event
